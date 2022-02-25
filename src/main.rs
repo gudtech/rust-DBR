@@ -19,5 +19,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut c1_conn = instance.connection()?;
     let values: Vec<mysql::Row> = c1_conn.query("SELECT * FROM customer_order")?;
     dbg!(values);
+
     Ok(())
 }
