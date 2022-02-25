@@ -18,7 +18,7 @@ impl ToSql for Condition {
     }
 }
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use mysql::Error;
 
@@ -50,7 +50,7 @@ where
 pub struct DbrObject<T> {
     // some hash of the callsite so we can remember what was fetched
     callsite: u128,
-    connection: Arc<mysql::Conn>,
+    connection: Arc<Mutex<mysql::Conn>>,
     inner: T,
 }
 
@@ -58,7 +58,7 @@ pub struct DbrObject<T> {
 //#[relation(Album, remotekey = "artist_id")]
 #[derive(Default)]
 pub struct Artist {
-    pub id: Option<i64>,
+    pub id: i64,
     pub name: Option<String>,
 }
 
@@ -74,7 +74,7 @@ impl Queryable for Artist {
 
         for (index, column) in columns.iter().enumerate() {
             match column.name_str().to_string().as_str() {
-                "id" => artist.id = row.get(index),
+                "id" => artist.id = row.get(index).expect("need id for dbr object"),
                 "name" => artist.name = row.get(index),
                 _ => {},
             }
@@ -85,27 +85,24 @@ impl Queryable for Artist {
 }
 
 pub trait ArtistFetch {
-    fn id(&mut self) -> Result<&i64, Error>;
+    fn id(&self) -> i64;
     fn name(&mut self) -> Result<&String, Error>;
 }
 
 impl ArtistFetch for DbrObject<Artist> {
-    fn id(&mut self) -> Result<&i64, Error> {
-        match &self.inner.id {
-            Some(id) => Ok(id),
-            None => {
-                unimplemented!()
-            }
-        }
+    fn id(&self) -> i64 {
+        self.inner.id
     }
 
     fn name(&mut self) -> Result<&String, Error> {
-        match &self.inner.name {
-            Some(name) => Ok(name),
-            None => {
+        match &mut self.inner.name {
+            Some(name) => Ok(&*name),
+            value => {
+                use mysql::prelude::Queryable;
                 // ok we need to go fetch it and add this to the cache
-                //self.connection.query(...)
-                unimplemented!()
+                let name: Option<String> = self.connection.lock()?.query_first("SELECT name FROM artist WHERE id = :id")?;
+                *value = name;
+                Ok(value.as_ref().unwrap())
             }
         }
     }
