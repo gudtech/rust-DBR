@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 mysql = "22.1.0"
+sqlite = "0.26.0"
