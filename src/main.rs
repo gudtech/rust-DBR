@@ -1,9 +1,15 @@
 
 use rust_dbr::config::instance::Instance;
+use rust_dbr::callsite;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use mysql::*;
     use mysql::prelude::*;
+
+    callsite!();
+    callsite!();
+    callsite!();
+    callsite!();
 
     let opts = Opts::from_url("mysql://devuser:password@localhost:3306/")?;
     //let sqlite = sqlite::open(":memory:");

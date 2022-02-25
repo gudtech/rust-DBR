@@ -65,7 +65,7 @@ impl DbrCallsite {
 
 pub struct DbrMeta {
     // some hash of the callsite so we can remember what was fetched
-    pub callsite: u128,
+    pub callsite: u64,
     pub callsite_cache: Arc<Mutex<Vec<String>>>,
     pub connection: Arc<Mutex<mysql::Conn>>,
     pub extra_fields_queried: Vec<String>,
@@ -81,18 +81,25 @@ impl Drop for DbrMeta {
     }
 }
 
+#[macro_export]
 macro_rules! callsite {
     () => {
-        let mut hasher = DefaultHasher::new();
-        hasher.hash(file!())
-        hasher.hash(line!())
-        hasher.hash(column!())
-        let hash = hasher.finish();
+        {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            file!().hash(&mut hasher);
+            line!().hash(&mut hasher);
+            column!().hash(&mut hasher);
+            let hash = hasher.finish();
+            dbg!(hash);
+        }
+        /*
         DbrObject {
             callsite: hash,
             connection: conn,
             callsite_cache: 
         }
+        */
     }
 }
 
