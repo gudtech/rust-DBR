@@ -18,7 +18,7 @@ impl ToSql for Condition {
     }
 }
 
-use std::sync::{Arc, Mutex};
+use std::{sync::{Arc, Mutex}, collections::HashMap, ops::DerefMut};
 
 use mysql::Error;
 
@@ -26,51 +26,93 @@ pub trait Queryable
 where
     Self: Sized
 {
-    fn fetch(conditions: Vec<Condition>) -> Result<Vec<Self>, Error> {
-        let rows = Self::fetch_raw(conditions)?;
+    fn fetch(callsite: DbrCallsite, conditions: Vec<Condition>) -> Result<Vec<Self>, Error> {
+        let rows = Self::fetch_raw(callsite.meta.lock()?.connection.lock()?, conditions)?;
 
         let mut objects = Vec::new();
         for row in rows {
-            objects.push(Self::from_row(row)?);
+            let callsite = callsite.duplicate_callsite();
+            objects.push(Self::from_row(callsite, row)?);
         }
 
         Ok(objects)
     }
 
-    fn all() -> Result<Vec<Self>, Error> {
-        Self::fetch(Vec::new())
+    fn all(callsite: DbrCallsite) -> Result<Vec<Self>, Error> {
+        Self::fetch(callsite, Vec::new())
     }
 
-    fn fetch_raw(conditions: Vec<Condition>) -> Result<Vec<mysql::Row>, Error>;
+    fn fetch_raw<C: DerefMut<Target = mysql::Conn>>(conn: C, conditions: Vec<Condition>) -> Result<Vec<mysql::Row>, Error>;
 
-    fn from_row(row: mysql::Row) -> Result<Self, Error>;
+    fn from_row(callsite: DbrCallsite, row: mysql::Row) -> Result<Self, Error>;
 }
 
+pub struct CallsiteCache {
+    callsites: HashMap<u128, Arc<Mutex<Vec<String>>>>,
+}
 
-pub struct DbrObject<T> {
+pub struct DbrCallsite {
+    pub meta: Arc<Mutex<DbrMeta>>,
+}
+
+impl DbrCallsite {
+    pub fn duplicate_callsite(&self) -> Self {
+        Self {
+            meta: self.meta.clone(),
+        }
+    }
+}
+
+pub struct DbrMeta {
     // some hash of the callsite so we can remember what was fetched
-    callsite: u128,
-    connection: Arc<Mutex<mysql::Conn>>,
-    inner: T,
+    pub callsite: u128,
+    pub callsite_cache: Arc<Mutex<Vec<String>>>,
+    pub connection: Arc<Mutex<mysql::Conn>>,
+    pub extra_fields_queried: Vec<String>,
+}
+
+impl Drop for DbrMeta {
+    fn drop(&mut self) {
+        if self.extra_fields_queried.len() > 0 {
+            if let Ok(mut cache) = self.callsite_cache.lock() {
+                cache.extend(self.extra_fields_queried.clone());
+            }
+        }
+    }
+}
+
+macro_rules! callsite {
+    () => {
+        let mut hasher = DefaultHasher::new();
+        hasher.hash(file!())
+        hasher.hash(line!())
+        hasher.hash(column!())
+        let hash = hasher.finish();
+        DbrObject {
+            callsite: hash,
+            connection: conn,
+            callsite_cache: 
+        }
+    }
 }
 
 //#[derive(DBR, Default)]
 //#[relation(Album, remotekey = "artist_id")]
-#[derive(Default)]
 pub struct Artist {
+    pub _meta: DbrCallsite,
     pub id: i64,
     pub name: Option<String>,
 }
 
 // proc macro to expand out into
 impl Queryable for Artist {
-    fn fetch_raw(conditions: Vec<Condition>) -> Result<Vec<mysql::Row>, Error> {
+    fn fetch_raw<C: DerefMut<Target = mysql::Conn>>(conn: C, conditions: Vec<Condition>) -> Result<Vec<mysql::Row>, Error> {
         Ok(Vec::new())
     }
 
-    fn from_row(row: mysql::Row) -> Result<Self, Error> {
+    fn from_row(object: DbrCallsite, row: mysql::Row) -> Result<Self, Error> {
         let columns = row.columns_ref();
-        let mut artist =  Self::default();
+        let mut artist =  Self::default_with_object(object);
 
         for (index, column) in columns.iter().enumerate() {
             match column.name_str().to_string().as_str() {
@@ -84,23 +126,28 @@ impl Queryable for Artist {
     }
 }
 
-pub trait ArtistFetch {
-    fn id(&self) -> i64;
-    fn name(&mut self) -> Result<&String, Error>;
-}
+impl Artist {
+    pub fn default_with_object(object: DbrCallsite) -> Self {
+        Self {
+            _meta: object,
+            id: 0,
+            name: None,
+        }
+    }
 
-impl ArtistFetch for DbrObject<Artist> {
     fn id(&self) -> i64 {
-        self.inner.id
+        self.id
     }
 
     fn name(&mut self) -> Result<&String, Error> {
-        match &mut self.inner.name {
+        match &mut self.name {
             Some(name) => Ok(&*name),
             value => {
                 use mysql::prelude::Queryable;
+                let mut meta = self._meta.meta.lock()?;
                 // ok we need to go fetch it and add this to the cache
-                let name: Option<String> = self.connection.lock()?.query_first("SELECT name FROM artist WHERE id = :id")?;
+                let name: Option<String> = meta.connection.lock()?.query_first("SELECT name FROM artist WHERE id = :id")?;
+                meta.extra_fields_queried.push("name".to_owned());
                 *value = name;
                 Ok(value.as_ref().unwrap())
             }
