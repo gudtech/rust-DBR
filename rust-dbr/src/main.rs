@@ -1,10 +1,9 @@
-
-use rust_dbr::config::instance::Instance;
 use rust_dbr::callsite;
+use rust_dbr::config::instance::Instance;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use mysql::*;
     use mysql::prelude::*;
+    use mysql::*;
 
     callsite!();
     callsite!();
@@ -20,7 +19,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut instances = Instance::fetch_all(&mut conn)?;
     dbg!(&instances);
 
-    let instance = instances.iter().filter(|instance| instance.tag == Some("c1".to_owned())).next().unwrap();
+    let instance = instances
+        .iter()
+        .filter(|instance| instance.tag == Some("c1".to_owned()))
+        .next()
+        .unwrap();
     dbg!(&instance);
     let mut c1_conn = instance.connection()?;
     let values: Vec<mysql::Row> = c1_conn.query("SELECT * FROM customer_order")?;

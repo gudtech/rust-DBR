@@ -1,17 +1,20 @@
 use rust_dbr::query::queryable::DbrObject;
 
 
-#[derive(Dbr, Debug)]
+#[dbr(table_name = "artist")]
+#[derive(Debug)]
 pub struct Artist {
     id: i64,
-    name: Option<String>,
+    name: String,
 }
 
+#[dbr(table_name = "album")]
+#[derive(Debug)]
 pub struct Album {
     id: i64,
     artist_id: i64,
-    name: Option<String>,
-    date_released: Option<u64>,
+    name: String,
+    date_released: u64,
 }
 
 pub struct Context {

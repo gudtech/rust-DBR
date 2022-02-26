@@ -1,4 +1,3 @@
-
 /*
 sub sql{
       my $self = shift;
@@ -24,8 +23,7 @@ sub sql{
 }
 */
 
-pub struct Insert {
-}
+pub struct Insert {}
 
 impl Insert {
     fn test() {

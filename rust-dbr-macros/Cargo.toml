@@ -1,0 +1,13 @@
+[package]
+name = "rust-dbr-macros"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0.7"
+syn = {version = "1.0.52", features = ["full", "extra-traits"]}
+mysql = "22.1.0"
+sqlite = "0.26.0"

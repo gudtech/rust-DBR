@@ -983,16 +983,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rust-dbr-macros"
-version = "0.1.0"
-dependencies = [
- "mysql",
- "quote",
- "sqlite",
- "syn",
-]
-
-[[package]]
 name = "rust_decimal"
 version = "1.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1,4 +1,3 @@
-
 pub struct Select {
     fields: Vec<Field>,
     table: Table,
