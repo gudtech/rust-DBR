@@ -20,7 +20,7 @@ use std::{
     any::{Any, TypeId},
     collections::{BTreeMap, HashMap},
     ops::DerefMut,
-    sync::{Arc, Mutex, Weak},
+    sync::{Arc, Mutex, RwLock, Weak},
 };
 
 use mysql::Error;
@@ -54,7 +54,7 @@ where
 }
 
 pub struct DbrRecordStore {
-    records: HashMap<TypeId, Box<dyn Any>>,
+    records: RwLock<HashMap<TypeId, Box<dyn Any>>>,
 }
 
 type Store<T> = BTreeMap<i64, Weak<Mutex<T>>>;
@@ -63,12 +63,16 @@ type Store<T> = BTreeMap<i64, Weak<Mutex<T>>>;
 pub enum DbrError {
     DowncastError,
     Unimplemented(String),
+    PoisonError,
+    UnregisteredType,
 }
 
 impl std::fmt::Display for DbrError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match &self {
             Self::DowncastError => write!(f, "downcast error"),
+            Self::PoisonError => write!(f, "poisoned"),
+            Self::UnregisteredType => write!(f, "tried to read unregistered type"),
             Self::Unimplemented(value) => write!(f, "unimplemented {}", value),
         }
     }
@@ -79,19 +83,30 @@ impl std::error::Error for DbrError {}
 impl DbrRecordStore {
     pub fn new() -> Self {
         Self {
-            records: HashMap::new(),
+            records: RwLock::new(HashMap::new()),
         }
     }
 
-    pub fn register<T: Any>(&mut self) {
-        let records = self
-            .records
-            .entry(TypeId::of::<T>())
+    pub fn register<T: Any>(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut map = self.records.write().map_err(|err| DbrError::PoisonError)?;
+        map.entry(TypeId::of::<T>())
             .or_insert(Box::new(Store::<T>::new()));
+        Ok(())
+    }
+
+    pub fn is_registered<T: Any>(&self) -> Result<bool, Box<dyn std::error::Error>> {
+        let map = self.records.read().map_err(|err| DbrError::PoisonError)?;
+        let contains = map.contains_key(&TypeId::of::<T>());
+        Ok(contains)
     }
 
     pub fn record<T: Any>(&self, id: i64) -> Result<Arc<Mutex<T>>, Box<dyn std::error::Error>> {
-        match self.records.get(&TypeId::of::<T>()) {
+        if !self.is_registered::<T>()? {
+            self.register::<T>()?;
+        }
+
+        let map = self.records.read().map_err(|err| DbrError::PoisonError)?;
+        match map.get(&TypeId::of::<T>()) {
             Some(records) => {
                 match records.downcast_ref::<Store<T>>() {
                     Some(downcasted) => {
@@ -109,9 +124,7 @@ impl DbrRecordStore {
                     None => Err(Box::new(DbrError::Unimplemented("downcast err".to_owned()))),
                 }
             }
-            None => Err(Box::new(DbrError::Unimplemented(
-                "unregistered type".to_owned(),
-            ))),
+            None => Err(Box::new(DbrError::UnregisteredType)),
         }
     }
 }
@@ -150,26 +163,6 @@ impl Drop for DbrMeta {
     }
 }
 
-#[macro_export]
-macro_rules! callsite {
-    () => {{
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        file!().hash(&mut hasher);
-        line!().hash(&mut hasher);
-        column!().hash(&mut hasher);
-        let hash = hasher.finish();
-        dbg!(hash);
-    }
-    /*
-    DbrObject {
-        callsite: hash,
-        connection: conn,
-        callsite_cache:
-    }
-    */};
-}
-
 //#[derive(DBR, Default)]
 //#[relation(Album, remotekey = "artist_id")]
 pub struct Artist {
@@ -190,7 +183,7 @@ impl Artist {
         let locked = record.lock();
         match locked {
             Ok(locked_record) => Ok(locked_record.clone()),
-            Err(_) => Err(Box::new(DbrError::Unimplemented("poisoned".to_owned())))
+            Err(_) => Err(Box::new(DbrError::Unimplemented("poisoned".to_owned()))),
         }
     }
 

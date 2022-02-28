@@ -1,14 +1,13 @@
-use rust_dbr::query::queryable::DbrObject;
+//use rust_dbr::query::queryable::DbrObject;
 
-
-#[dbr(table_name = "artist")]
+//#[dbr(table_name = "artist")]
 #[derive(Debug)]
 pub struct Artist {
     id: i64,
     name: String,
 }
 
-#[dbr(table_name = "album")]
+//#[dbr(table_name = "album")]
 #[derive(Debug)]
 pub struct Album {
     id: i64,
@@ -18,7 +17,7 @@ pub struct Album {
 }
 
 pub struct Context {
-    client: Client,
+    //client: Client,
     conn: mysql::Conn,
 }
 
@@ -26,10 +25,13 @@ pub struct Request {
     request_id: i64,
 }
 
-pub struct Response { }
+pub struct Response {}
 
+/*
 pub fn get_albums(context: Context, params: RequestParams) -> Result<Response, Error> {
     let artists = Artist::fetch_all();
+
+    artist::fetch!();
 
     for artist in artists {
         let name = artist.name()?;
@@ -45,4 +47,9 @@ pub fn get_albums(context: Context, params: RequestParams) -> Result<Response, E
     }
 
     Ok(Response { })
+}
+*/
+
+fn main() {
+    let artist = fetch!(Artist, id => 1);
 }

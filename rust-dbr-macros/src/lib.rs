@@ -34,3 +34,8 @@ pub fn dbr(args: TokenStream, input: TokenStream) -> TokenStream {
     }
     .into();
 }
+
+#[proc_macro]
+pub fn fetch(input: TokenStream) -> TokenStream {
+    input
+}
