@@ -978,6 +978,7 @@ dependencies = [
 name = "rust-dbr"
 version = "0.1.0"
 dependencies = [
+ "lazy_static",
  "mysql",
  "sqlite",
 ]
