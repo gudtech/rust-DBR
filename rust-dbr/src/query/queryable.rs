@@ -145,8 +145,10 @@ impl ActiveArtist {
 /// Global identifier for a DBR instance.
 ///
 /// Equivalent to the id of the dbr.dbr_instances table.
+#[derive(Debug, Copy, Clone)]
 pub struct DbrInstanceId(i64);
 
+#[derive(Debug, Clone)]
 pub struct DbrInstance {
     id: i64,
 
@@ -175,7 +177,7 @@ pub struct DbrInstance {
     /// Feel free to move them above and add a comment if you think otherwise!
     schema_id: i64,
     database_file: Option<String>,
-    read_only: bool,
+    read_only: Option<bool>,
 }
 
 lazy_static::lazy_static! {
@@ -187,7 +189,7 @@ impl DbrInstance {
     /// Look up all the dbr instances in the metadata database, doesn't necessarily create connections for them.
     pub fn fetch_all(metadata: &mut mysql::Conn) -> Result<Vec<DbrInstance>, DbrError> {
         let instances = metadata.query_map(
-            r"SELECT instance_id, module, handle, class, tag, dbname, username, password, host, schema_id, dbfile, readonly",
+            r"SELECT instance_id, module, handle, class, tag, dbname, username, password, host, schema_id, dbfile, readonly FROM dbr_instances",
             |(id, module, handle, class, tag, database_name, username, password, host, schema_id, database_file, read_only)| {
                 DbrInstance {
                     id, module, handle, class, tag, database_name, username, password, host, schema_id, database_file, read_only,
@@ -196,16 +198,16 @@ impl DbrInstance {
         Ok(instances)
     }
 
-    pub fn common(instances: impl Iterator<Item = DbrInstance>) -> Vec<DbrInstanceId> {
+    pub fn common_instances<'a>(instances: impl Iterator<Item = &'a DbrInstance>) -> Vec<DbrInstanceId> {
         instances
             .filter(|instance| instance.tag.is_none() && instance.class == "master")
             .map(|instance| DbrInstanceId(instance.id))
             .collect()
     }
 
-    pub fn from_client_id(
+    pub fn client_instances<'a>(
         client_id: i64,
-        instances: impl Iterator<Item = DbrInstance>,
+        instances: impl Iterator<Item = &'a DbrInstance>,
     ) -> Vec<DbrInstanceId> {
         let client_tag = format!("c{}", client_id);
         instances

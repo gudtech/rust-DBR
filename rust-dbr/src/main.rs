@@ -6,10 +6,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let opts = Opts::from_url("mysql://devuser:password@localhost:3306/dbr")?;
     let mut metadata_conn = Conn::new(opts)?;
-    let instances = DbrInstance::fetch_all();
+    let instances = DbrInstance::fetch_all(&mut metadata_conn)?;
     //let sqlite = sqlite::open(":memory:");
+    dbg!(&instances);
 
-    let val: Vec<String> = conn.query("SHOW TABLES FROM dbr")?;
+    let common = DbrInstance::common_instances(instances.iter());
+    dbg!(common);
+    let client = DbrInstance::client_instances(1, instances.iter());
+    dbg!(client);
+    //dbg!(DbrInstance::client_instances(1, instances.iter()));
+
+    //let val: Vec<String> = conn.query("SHOW TABLES")?;
 
     //let mut instances = Instance::fetch_all(&mut conn)?;
     /* dbg!(&instances);
