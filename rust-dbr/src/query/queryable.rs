@@ -36,6 +36,12 @@ pub trait ActiveModel {
     }
 }
 
+pub trait DbrTable {
+    type ActiveModel: ActiveModel;
+    fn instance_handle() -> &'static str;
+    fn table_name() -> &'static str;
+}
+
 pub struct DbrRecordStore {
     records: RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
 }
@@ -108,16 +114,19 @@ impl DbrRecordStore {
     }
 }
 
-//#[dbr(table_name = "artist")]
-//#[derive(DbrTable)]
-//#[dbr(table_name = "artist")]
-//#[relation(Album, remotekey = "artist_id")]
-// proc macro attribute to expand out into
 #[derive(Debug, Clone)]
-//#[dbr(table_name = "artist")]
+//#[derive(DbrTable)]
+//#[dbr(table = "ops.artist")]
+// proc macro attribute to expand out into
 pub struct Artist {
     pub id: i64,
     pub name: String,
+}
+
+impl DbrTable for Artist {
+    type ActiveModel = ActiveArtist;
+    fn instance_handle() -> &'static str { "ops" }
+    fn table_name() -> &'static str { "artist" }
 }
 
 pub struct ActiveArtist {
@@ -186,6 +195,10 @@ lazy_static::lazy_static! {
 }
 
 impl DbrInstance {
+    pub fn client_tag(client_id: i64) -> String {
+        format!("c{}", client_id)
+    }
+
     /// Look up all the dbr instances in the metadata database, doesn't necessarily create connections for them.
     pub fn fetch_all(metadata: &mut mysql::Conn) -> Result<Vec<DbrInstance>, DbrError> {
         let instances = metadata.query_map(
@@ -196,6 +209,17 @@ impl DbrInstance {
                 }
         })?;
         Ok(instances)
+    }
+
+    pub fn by_handle<'a>(client_id: Option<i64>, handle: String, instances: impl Iterator<Item = &'a DbrInstance>) -> Vec<DbrInstanceId> {
+        let mut ids = Vec::new();
+        for instance in instances {
+            let client_tag = client_id.map(|id| DbrInstance::client_tag(id));
+            if client_tag == instance.tag {
+
+            }
+        }
+        ids
     }
 
     pub fn common_instances<'a>(instances: impl Iterator<Item = &'a DbrInstance>) -> Vec<DbrInstanceId> {
@@ -209,11 +233,10 @@ impl DbrInstance {
         client_id: i64,
         instances: impl Iterator<Item = &'a DbrInstance>,
     ) -> Vec<DbrInstanceId> {
-        let client_tag = format!("c{}", client_id);
         instances
             .filter(|instance| {
                 instance.tag.is_some() // we check for some right before so this should be fine.
-                    && instance.tag.as_ref().unwrap() == &client_tag
+                    && instance.tag.as_ref().unwrap() == &DbrInstance::client_tag(client_id)
                     && instance.class == "master"
             })
             .map(|instance| DbrInstanceId(instance.id))
@@ -234,6 +257,8 @@ impl DbrContext {
         }
     }
 }
+
+// TODO HERE: design worker thread that will actually fetch records
 
 // fetch!(&mut conn, Artist where id = 1);
 // expands to (minus the fn for type checking/compiling testing purposes)
@@ -260,6 +285,36 @@ fn fetch_record_store() -> Result<Vec<Artist>, Box<dyn std::error::Error>> {
     let mut conn = mysql::Conn::new(opts)?;
     let id: i64 = 1;
 
+    /*
+    Song {
+        id: i64,
+        #[relation(Album)]
+        album_id: i64,
+    }
+
+    Album {
+        id: i64,
+        #[relation(Artist)]
+        artist_id: i64,
+    }
+
+    Artist {
+        id: i64,
+        name: String,
+        genre: String,
+    } */
+
+    // fetch!(&mut conn, Song where album.artist.genre = "Rock");
+
+    // just some mocking up to lay out some idea on how the processing will work in the macro
+    
+    // check if field first
+    // if not field check if relational table
+    // if relation:
+    //     switch context to that relational table
+    //     recurse back to checking field for as many relations until a field is found
+
+    // SELECT id, album_id FROM song, album, artist WHERE song.album_id = album.id AND album.artist_id = artist.id AND artist.genre = "Rock"
     {
         use mysql::prelude::Queryable;
         const QUERY: &'static str = r"SELECT id, name FROM artist WHERE id = ?";
