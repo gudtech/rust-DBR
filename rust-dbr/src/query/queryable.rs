@@ -1,10 +1,12 @@
 use std::{
     any::{Any, TypeId},
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, btree_map::Entry},
     sync::{Arc, Mutex, RwLock, Weak},
 };
 
-use mysql::prelude::Queryable;
+use async_trait::async_trait;
+use mysql_async::prelude::{WithParams, Query};
+//use mysql::prelude::{Queryable, WithParams, BinQuery};
 
 #[derive(Debug)]
 pub enum DbrError {
@@ -14,11 +16,18 @@ pub enum DbrError {
     UnregisteredType,
     RecordNotFetched(i64),
     MysqlError(mysql::Error),
+    MysqlAsyncError(mysql_async::Error),
 }
 
 impl From<mysql::Error> for DbrError {
     fn from(err: mysql::Error) -> Self {
         Self::MysqlError(err)
+    }
+}
+
+impl From<mysql_async::Error> for DbrError {
+    fn from(err: mysql_async::Error) -> Self {
+        Self::MysqlAsyncError(err)
     }
 }
 
@@ -32,7 +41,7 @@ pub trait ActiveModel {
     fn model(&self) -> Result<Self::Model, DbrError> {
         let record = self.store().record::<Self::Model>(self.id())?;
         let locked_record = record.lock().map_err(|_| DbrError::PoisonError)?;
-        Ok(locked_record.clone())
+        Ok(locked_record.clone().data)
     }
 }
 
@@ -46,7 +55,7 @@ pub struct DbrRecordStore {
     records: RwLock<HashMap<TypeId, Box<dyn Any + Send + Sync>>>,
 }
 
-pub type Store<T> = BTreeMap<i64, Weak<Mutex<T>>>;
+pub type Store<T> = BTreeMap<i64, Weak<Mutex<RecordMetadata<T>>>>;
 
 impl std::fmt::Display for DbrError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -58,11 +67,27 @@ impl std::fmt::Display for DbrError {
             Self::Unimplemented(value) => write!(f, "unimplemented {}", value),
 
             Self::MysqlError(err) => write!(f, "mysql error: {}", err),
+            Self::MysqlAsyncError(err) => write!(f, "mysql async error: {}", err),
         }
     }
 }
 
 impl std::error::Error for DbrError {}
+
+#[derive(Debug, Clone)]
+pub struct RecordMetadata<T> {
+    update_time: u64,
+    data: T,
+}
+
+impl<T> RecordMetadata<T> {
+    pub fn new(data: T) -> Self {
+        Self {
+            update_time: 0,
+            data: data,
+        }
+    }
+}
 
 impl DbrRecordStore {
     pub fn new() -> Self {
@@ -92,7 +117,48 @@ impl DbrRecordStore {
         Ok(())
     }
 
-    pub fn record<T: Any + Send + Sync>(&self, id: i64) -> Result<Arc<Mutex<T>>, DbrError> {
+    pub fn set_record<T: Any + Send + Sync>(&self, id: i64, record: T) -> Result<Arc<Mutex<RecordMetadata<T>>>, DbrError> {
+        self.assert_registered::<T>()?;
+
+        let map = self.records.read().map_err(|_| DbrError::PoisonError)?;
+        match map.get(&TypeId::of::<T>()) {
+            Some(records) => match records.downcast_mut::<Store<T>>() {
+                Some(downcasted) => {
+                    let strong = match downcasted.entry(id) {
+                        Entry::Occupied(occupied) => {
+                            match occupied.get().upgrade() {
+                                Some(strong) => {
+                                    {
+                                        let mut locked_existing = strong.lock().map_err(|_| DbrError::PoisonError)?;
+                                        *locked_existing = RecordMetadata::new(record);
+                                    }
+
+                                    Some(strong)
+                                }
+                                None => None,
+                            }
+                        }
+                        _ => None,
+                    };
+
+                    match strong {
+                        Some(strong) => Ok(strong),
+                        None => {
+                            let new = Arc::new(Mutex::new(RecordMetadata::new(record)));
+                            let weak = Arc::downgrade(&new);
+                            downcasted.insert(id, weak);
+
+                            Ok(new)
+                        }
+                    }
+                }
+                None => Err(DbrError::DowncastError),
+            },
+            None => Err(DbrError::UnregisteredType),
+        }
+    }
+
+    pub fn record<T: Any + Send + Sync>(&self, id: i64) -> Result<Arc<Mutex<RecordMetadata<T>>>, DbrError> {
         self.assert_registered::<T>()?;
 
         let map = self.records.read().map_err(|_| DbrError::PoisonError)?;
@@ -201,6 +267,8 @@ impl DbrInstance {
 
     /// Look up all the dbr instances in the metadata database, doesn't necessarily create connections for them.
     pub fn fetch_all(metadata: &mut mysql::Conn) -> Result<Vec<DbrInstance>, DbrError> {
+        use mysql::prelude::Queryable;
+
         let instances = metadata.query_map(
             r"SELECT instance_id, module, handle, class, tag, dbname, username, password, host, schema_id, dbfile, readonly FROM dbr_instances",
             |(id, module, handle, class, tag, database_name, username, password, host, schema_id, database_file, read_only)| {
@@ -258,6 +326,32 @@ impl DbrContext {
     }
 }
 
+use std::sync::mpsc::{Sender, Receiver};
+
+pub struct RecordWorker {
+    requests: HashMap<TypeId, Receiver<Box<dyn StoreRequest>>>,
+    instance: DbrInstanceId,
+    store: Arc<DbrRecordStore>,
+}
+
+pub struct BasicStoreRequest<T> {
+    query: String,
+    phantom: std::marker::PhantomData<T>,
+}
+
+pub struct StoreResponse<T> {
+    response: Vec<T>,
+}
+
+#[async_trait]
+pub trait StoreRequest {
+    /*fn run_and_store(&self, conn: &mut mysql_async::Conn, store: Arc<DbrRecordStore>)-> Result<(), DbrError> {
+        use futures::executor::block_on;
+        block_on(self.run_and_store_async(conn, store))
+    }*/
+    async fn run_and_store_async(&self, conn: &mut mysql_async::Conn, store: Arc<DbrRecordStore>) -> Result<(), DbrError>;
+}
+
 // TODO HERE: design worker thread that will actually fetch records
 
 // fetch!(&mut conn, Artist where id = 1);
@@ -313,6 +407,22 @@ fn fetch_record_store() -> Result<Vec<Artist>, Box<dyn std::error::Error>> {
     // if relation:
     //     switch context to that relational table
     //     recurse back to checking field for as many relations until a field is found
+
+pub struct ArtistRequest {
+    params: (i64,)
+}
+
+#[async_trait]
+impl StoreRequest for ArtistRequest {
+    async fn run_and_store_async(&self, conn: &mut mysql_async::Conn, store: Arc<DbrRecordStore>) -> Result<(), DbrError> {
+        const QUERY: &'static str = r"SELECT id, name FROM artist WHERE id = ?";
+        let results = QUERY
+            .with(self.params)
+            .map(conn, |(id, name)| Artist { id, name });
+
+        Ok(())
+    }
+}
 
     // SELECT id, album_id FROM song, album, artist WHERE song.album_id = album.id AND album.artist_id = artist.id AND artist.genre = "Rock"
     {
