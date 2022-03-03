@@ -1,11 +1,11 @@
 use std::{
     any::{Any, TypeId},
-    collections::{BTreeMap, HashMap, btree_map::Entry},
+    collections::{btree_map::Entry, BTreeMap, HashMap},
     sync::{Arc, Mutex, RwLock, Weak},
 };
 
 use async_trait::async_trait;
-use mysql_async::prelude::{WithParams, Query};
+use mysql_async::prelude::{Query, WithParams};
 //use mysql::prelude::{Queryable, WithParams, BinQuery};
 
 #[derive(Debug)]
@@ -15,6 +15,7 @@ pub enum DbrError {
     PoisonError,
     UnregisteredType,
     RecordNotFetched(i64),
+    MissingStore(String),
     MysqlError(mysql::Error),
     MysqlAsyncError(mysql_async::Error),
 }
@@ -37,10 +38,9 @@ impl From<mysql_async::Error> for DbrError {
 pub trait ActiveModel {
     type Model: Send + Sync + Sized + Clone + 'static;
     fn id(&self) -> i64;
-    fn store(&self) -> &Arc<DbrRecordStore>;
-    fn model(&self) -> Result<Self::Model, DbrError> {
-        let record = self.store().record::<Self::Model>(self.id())?;
-        let locked_record = record.lock().map_err(|_| DbrError::PoisonError)?;
+    fn data(&self) -> &Arc<Mutex<RecordMetadata<Self::Model>>>;
+    fn snapshot(&self) -> Result<Self::Model, DbrError> {
+        let locked_record = self.data().lock().map_err(|_| DbrError::PoisonError)?;
         Ok(locked_record.clone().data)
     }
 }
@@ -65,6 +65,7 @@ impl std::fmt::Display for DbrError {
             Self::UnregisteredType => write!(f, "tried to read unregistered type"),
             Self::RecordNotFetched(id) => write!(f, "record was not available: {}", id),
             Self::Unimplemented(value) => write!(f, "unimplemented {}", value),
+            Self::MissingStore(store) => write!(f, "missing store '{}'", store),
 
             Self::MysqlError(err) => write!(f, "mysql error: {}", err),
             Self::MysqlAsyncError(err) => write!(f, "mysql async error: {}", err),
@@ -117,7 +118,11 @@ impl DbrRecordStore {
         Ok(())
     }
 
-    pub fn set_record<T: Any + Send + Sync>(&self, id: i64, record: T) -> Result<Arc<Mutex<RecordMetadata<T>>>, DbrError> {
+    pub fn set_record<T: Any + Send + Sync>(
+        &self,
+        id: i64,
+        record: T,
+    ) -> Result<Arc<Mutex<RecordMetadata<T>>>, DbrError> {
         self.assert_registered::<T>()?;
 
         let mut map = self.records.write().map_err(|_| DbrError::PoisonError)?;
@@ -129,7 +134,8 @@ impl DbrRecordStore {
                             match occupied.get().upgrade() {
                                 Some(strong) => {
                                     {
-                                        let mut locked_existing = strong.lock().map_err(|_| DbrError::PoisonError)?;
+                                        let mut locked_existing =
+                                            strong.lock().map_err(|_| DbrError::PoisonError)?;
                                         *locked_existing = RecordMetadata::new(record);
                                     }
 
@@ -141,7 +147,7 @@ impl DbrRecordStore {
                                     let weak = Arc::downgrade(&strong);
                                     occupied.insert(weak);
                                     Ok(strong)
-                                },
+                                }
                             }
                         }
                         Entry::Vacant(vacant) => {
@@ -149,7 +155,7 @@ impl DbrRecordStore {
                             let weak = Arc::downgrade(&strong);
                             vacant.insert(weak);
                             Ok(strong)
-                        },
+                        }
                     }
                 }
                 None => Err(DbrError::DowncastError),
@@ -158,7 +164,10 @@ impl DbrRecordStore {
         }
     }
 
-    pub fn record<T: Any + Send + Sync>(&self, id: i64) -> Result<Arc<Mutex<RecordMetadata<T>>>, DbrError> {
+    pub fn record<T: Any + Send + Sync>(
+        &self,
+        id: i64,
+    ) -> Result<Arc<Mutex<RecordMetadata<T>>>, DbrError> {
         self.assert_registered::<T>()?;
 
         let map = self.records.read().map_err(|_| DbrError::PoisonError)?;
@@ -190,30 +199,47 @@ pub struct Artist {
 }
 
 impl DbrTable for Artist {
-    type ActiveModel = ActiveArtist;
-    fn instance_handle() -> &'static str { "ops" }
-    fn table_name() -> &'static str { "artist" }
+    type ActiveModel = Active<Artist>;
+    fn instance_handle() -> &'static str {
+        "ops"
+    }
+    fn table_name() -> &'static str {
+        "artist"
+    }
 }
 
-pub struct ActiveArtist {
+pub struct Active<T> {
     id: i64,
-    store: Arc<DbrRecordStore>,
+    data: Arc<Mutex<RecordMetadata<T>>>,
 }
 
-impl ActiveModel for ActiveArtist {
-    type Model = Artist;
+impl<T> Active<T> {
+    pub fn from_arc(id: i64, data: Arc<Mutex<RecordMetadata<T>>>) -> Self {
+        Self { id, data, }
+    }
+}
+
+impl<T> ActiveModel for Active<T>
+where
+    T: Send + Sync + Sized + Clone + 'static,
+{
+    type Model = T;
     fn id(&self) -> i64 {
         self.id
     }
-    fn store(&self) -> &Arc<DbrRecordStore> {
-        &self.store
+    fn data(&self) -> &Arc<Mutex<RecordMetadata<T>>> {
+        &self.data
     }
 }
 
-impl ActiveArtist {
-    pub fn name(&self) -> Result<String, DbrError> {
-        let model = self.model()?;
-        Ok(model.name)
+pub trait ArtistFields {
+    fn name(&self) -> Result<String, DbrError>;
+}
+
+impl ArtistFields for Active<Artist> {
+    fn name(&self) -> Result<String, DbrError> {
+        let snapshot = self.snapshot()?;
+        Ok(snapshot.name)
     }
 }
 
@@ -279,18 +305,22 @@ impl DbrInstance {
         Ok(instances)
     }
 
-    pub fn by_handle<'a>(client_id: Option<i64>, handle: String, instances: impl Iterator<Item = &'a DbrInstance>) -> Vec<DbrInstanceId> {
+    pub fn by_handle<'a>(
+        client_id: Option<i64>,
+        handle: String,
+        instances: impl Iterator<Item = &'a DbrInstance>,
+    ) -> Vec<DbrInstanceId> {
         let mut ids = Vec::new();
         for instance in instances {
             let client_tag = client_id.map(|id| DbrInstance::client_tag(id));
-            if client_tag == instance.tag {
-
-            }
+            if client_tag == instance.tag {}
         }
         ids
     }
 
-    pub fn common_instances<'a>(instances: impl Iterator<Item = &'a DbrInstance>) -> Vec<DbrInstanceId> {
+    pub fn common_instances<'a>(
+        instances: impl Iterator<Item = &'a DbrInstance>,
+    ) -> Vec<DbrInstanceId> {
         instances
             .filter(|instance| instance.tag.is_none() && instance.class == "master")
             .map(|instance| DbrInstanceId(instance.id))
@@ -326,7 +356,7 @@ impl DbrContext {
     }
 }
 
-use std::sync::mpsc::{Sender, Receiver};
+use std::sync::mpsc::{Receiver, Sender};
 
 pub struct RecordWorker {
     requests: HashMap<TypeId, Receiver<Box<dyn StoreRequest>>>,
@@ -349,7 +379,11 @@ pub trait StoreRequest {
         use futures::executor::block_on;
         block_on(self.run_and_store_async(conn, store))
     }*/
-    async fn run_and_store_async(&self, conn: &mut mysql_async::Conn, store: Arc<DbrRecordStore>) -> Result<(), DbrError>;
+    async fn run_and_store_async(
+        &self,
+        conn: &mut mysql_async::Conn,
+        store: Arc<DbrRecordStore>,
+    ) -> Result<(), DbrError>;
 }
 
 // TODO HERE: design worker thread that will actually fetch records
@@ -358,13 +392,13 @@ pub trait StoreRequest {
 // expands to (minus the fn for type checking/compiling testing purposes)
 
 // on the client side:
-fn fetch_client() -> Result<Vec<ActiveArtist>, Box<dyn std::error::Error>> {
+fn fetch_client() -> Result<Vec<Active<Artist>>, Box<dyn std::error::Error>> {
     {
         // need to send request to worker thread so lets construct it
 
         //let artists: Vec<ActiveArtist> = fetch!(&mut context, Artist where id = 1);
         // this expands to
-        let artists: Vec<ActiveArtist> = {
+        let artists: Vec<Active<Artist>> = {
             async {};
             Vec::new()
         };
@@ -401,28 +435,32 @@ fn fetch_record_store() -> Result<Vec<Artist>, Box<dyn std::error::Error>> {
     // fetch!(&mut conn, Song where album.artist.genre = "Rock");
 
     // just some mocking up to lay out some idea on how the processing will work in the macro
-    
+
     // check if field first
     // if not field check if relational table
     // if relation:
     //     switch context to that relational table
     //     recurse back to checking field for as many relations until a field is found
 
-pub struct ArtistRequest {
-    params: (i64,)
-}
-
-#[async_trait]
-impl StoreRequest for ArtistRequest {
-    async fn run_and_store_async(&self, conn: &mut mysql_async::Conn, store: Arc<DbrRecordStore>) -> Result<(), DbrError> {
-        const QUERY: &'static str = r"SELECT id, name FROM artist WHERE id = ?";
-        let results = QUERY
-            .with(self.params)
-            .map(conn, |(id, name)| Artist { id, name });
-
-        Ok(())
+    pub struct ArtistRequest {
+        params: (i64,),
     }
-}
+
+    #[async_trait]
+    impl StoreRequest for ArtistRequest {
+        async fn run_and_store_async(
+            &self,
+            conn: &mut mysql_async::Conn,
+            store: Arc<DbrRecordStore>,
+        ) -> Result<(), DbrError> {
+            const QUERY: &'static str = r"SELECT id, name FROM artist WHERE id = ?";
+            let results = QUERY
+                .with(self.params)
+                .map(conn, |(id, name)| Artist { id, name });
+
+            Ok(())
+        }
+    }
 
     // SELECT id, album_id FROM song, album, artist WHERE song.album_id = album.id AND album.artist_id = artist.id AND artist.genre = "Rock"
     {
