@@ -50,12 +50,22 @@ pub fn get_albums(context: Context, params: RequestParams) -> Result<Response, E
 }
 */
 
+use futures::future::BoxFuture;
 use mysql_async::prelude::*;
+use rust_dbr::query::queryable::DbrRecordStore;
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct Payment {
     customer_id: i32,
     amount: i32,
     account_name: Option<String>,
+}
+
+pub struct FetchRequest<'a, T> {
+    future: BoxFuture<'a, Result<Vec<T>, mysql_async::Error>>
+}
+
+pub struct FetchSingleRequest<'a, T> {
+    future: BoxFuture<'a, Result<T, mysql_async::Error>>
 }
 
 #[tokio::main]
@@ -91,24 +101,58 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .batch(&mut conn)
         .await?;
 
+    //fetch!(Song where album.artist.genre = "Rock");
+    // SELECT id, name FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock";
+
     // Load payments from the database. Type inference will work here.
     let loaded_payments = "SELECT customer_id, amount, account_name FROM payment"
         .with(())
-        .map(&mut conn, |(customer_id, amount, account_name)| Payment { customer_id, amount, account_name })
-        .await?;
+        .map(&mut conn, |(customer_id, amount, account_name)| Payment { customer_id, amount, account_name });
 
-    const QUERY: &'static str = r"SELECT id, name FROM artist WHERE id = ?";
-    let results = QUERY
-        .with((1,))
-        .map(&mut conn, |(id, name)| Artist { id, name })
-        .await?;
+    pub struct Song {
+        id: i64,
+        name: String,
+        album_id: i64,
+    }
+
+    pub struct Context {
+        pool: mysql_async::Pool,
+
+    }
+
+    let mut store = DbrRecordStore::new();
+
+    let context = Context {
+        pool: pool,
+    };
+
+
+    let songs = {
+        let mut connection = context.pool.get_conn().await?;
+
+        const QUERY: &'static str = r#"SELECT id, name, album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock""#;
+        let result_set: Vec<Song> = QUERY
+            .with(())
+            .map(&mut connection, |(id, name, album_id)| Song { id, name, album_id })
+            .await?;
+
+        let mut active_records = Vec::new();
+        for song in result_set {
+            let active_record = store.set_record(song.id, song)?;
+            active_records.push(active_record);
+        }
+
+        active_records
+    };
+
+    let loaded_payments = loaded_payments.await?;
 
     // Dropped connection will go to the pool
     drop(conn);
 
     // The Pool must be disconnected explicitly because
     // it's an asynchronous operation.
-    pool.disconnect().await?;
+    context.pool.disconnect().await?;
 
     assert_eq!(loaded_payments, payments);
 

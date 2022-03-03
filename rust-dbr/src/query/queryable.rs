@@ -120,12 +120,12 @@ impl DbrRecordStore {
     pub fn set_record<T: Any + Send + Sync>(&self, id: i64, record: T) -> Result<Arc<Mutex<RecordMetadata<T>>>, DbrError> {
         self.assert_registered::<T>()?;
 
-        let map = self.records.read().map_err(|_| DbrError::PoisonError)?;
-        match map.get(&TypeId::of::<T>()) {
+        let mut map = self.records.write().map_err(|_| DbrError::PoisonError)?;
+        match map.get_mut(&TypeId::of::<T>()) {
             Some(records) => match records.downcast_mut::<Store<T>>() {
                 Some(downcasted) => {
-                    let strong = match downcasted.entry(id) {
-                        Entry::Occupied(occupied) => {
+                    match downcasted.entry(id) {
+                        Entry::Occupied(mut occupied) => {
                             match occupied.get().upgrade() {
                                 Some(strong) => {
                                     {
@@ -133,23 +133,23 @@ impl DbrRecordStore {
                                         *locked_existing = RecordMetadata::new(record);
                                     }
 
-                                    Some(strong)
+                                    Ok(strong)
                                 }
-                                None => None,
+                                None => {
+                                    // record doesn't actually exist anymore lets go make a new one.
+                                    let strong = Arc::new(Mutex::new(RecordMetadata::new(record)));
+                                    let weak = Arc::downgrade(&strong);
+                                    occupied.insert(weak);
+                                    Ok(strong)
+                                },
                             }
                         }
-                        _ => None,
-                    };
-
-                    match strong {
-                        Some(strong) => Ok(strong),
-                        None => {
-                            let new = Arc::new(Mutex::new(RecordMetadata::new(record)));
-                            let weak = Arc::downgrade(&new);
-                            downcasted.insert(id, weak);
-
-                            Ok(new)
-                        }
+                        Entry::Vacant(vacant) => {
+                            let strong = Arc::new(Mutex::new(RecordMetadata::new(record)));
+                            let weak = Arc::downgrade(&strong);
+                            vacant.insert(weak);
+                            Ok(strong)
+                        },
                     }
                 }
                 None => Err(DbrError::DowncastError),
