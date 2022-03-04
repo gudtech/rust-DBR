@@ -54,7 +54,9 @@ use std::{collections::HashMap, sync::Arc};
 
 use futures::future::BoxFuture;
 use mysql_async::prelude::*;
-use rust_dbr::query::queryable::{Active, DbrError, DbrRecordStore, DbrTable};
+use rust_dbr::query::queryable::{
+    Active, DbrError, DbrInstance, DbrInstances, DbrRecordStore, DbrTable,
+};
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct Payment {
     customer_id: i32,
@@ -157,46 +159,56 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     pub struct Context {
-        // handle -> store reference
-        //
-        // this is based on a client basis, so `ops` will go to the store with
-        // the handle `ops` and the tag `c1` and `constants` will go to the common
-        // dbr instance
-        stores: HashMap<String, Arc<DbrRecordStore>>,
+        client_id: Option<i64>,
+        instances: DbrInstances,
         pool: mysql_async::Pool,
     }
 
     impl Context {
-        pub fn store_from_handle(&self, handle: String) -> Option<&Arc<DbrRecordStore>> {
-            self.stores.get(&handle)
+        pub fn client_tag(&self) -> Option<String> {
+            self.client_id.map(|client_id| format!("c{}", client_id))
         }
     }
 
-    let mut map = HashMap::new();
-    map.insert("ops".to_owned(), Arc::new(DbrRecordStore::new()));
+    let instances = DbrInstances::new();
+
+    let opts = mysql::Opts::from_url("mysql://devuser:password@localhost:3306/dbr")?;
+    let mut metadata_conn = mysql::Conn::new(opts)?;
+    let all_instances = DbrInstance::fetch_all(&mut metadata_conn)?;
+    for instance in all_instances {
+        instances.insert(instance);
+    }
 
     let context = Context {
-        stores: map,
+        client_id: Some(1),
+        instances: instances,
         pool: pool,
     };
 
     let songs = {
         async fn song_fetch_internal(context: &Context) -> Result<Vec<Active<Song>>, DbrError> {
             let mut connection = context.pool.get_conn().await?;
-            let store = context
-                .stores
-                .get(Song::instance_handle())
+            let instance = context
+                .instances
+                .lookup_by_handle(Song::instance_handle().to_owned(), context.client_tag())
                 .ok_or(DbrError::MissingStore(Song::instance_handle().to_owned()))?;
 
-            const QUERY: &'static str = r#"SELECT id, name, album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock""#;
-            let result_set: Vec<Song> = QUERY
-                .with(())
-                .map(&mut connection, |(id, name, album_id)| Song {
-                    id,
-                    name,
-                    album_id,
-                })
-                .await?;
+            const MYSQL_QUERY: &'static str = r#"SELECT id, name, album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock""#;
+            const SQLITE_QUERY: &'static str = r#"SELECT id, name, album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock""#;
+
+            let result_set = match instance.info.module() {
+                StoreModule::Mysql => {
+                    MYSQL_QUERY
+                        .with(())
+                        .map(&mut connection, |(id, name, album_id)| Song {
+                            id,
+                            name,
+                            album_id,
+                        })
+                        .await?
+                }
+                StoreModule::SQLite => Vec::new(),
+            };
 
             let mut active_records: Vec<Active<Song>> = Vec::new();
             for song in result_set {
