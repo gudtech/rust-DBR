@@ -55,7 +55,7 @@ use std::{collections::HashMap, sync::Arc};
 use futures::future::BoxFuture;
 use mysql_async::prelude::*;
 use rust_dbr::query::queryable::{
-    Active, DbrError, DbrInstance, DbrInstances, DbrRecordStore, DbrTable,
+    Active, DbrError, DbrInstance, DbrInstances, DbrRecordCache, DbrTable, DbrInstanceInfo,
 };
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct Payment {
@@ -170,13 +170,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let instances = DbrInstances::new();
+    let mut instances = DbrInstances::new();
 
     let opts = mysql::Opts::from_url("mysql://devuser:password@localhost:3306/dbr")?;
     let mut metadata_conn = mysql::Conn::new(opts)?;
-    let all_instances = DbrInstance::fetch_all(&mut metadata_conn)?;
-    for instance in all_instances {
-        instances.insert(instance);
+    let all_instances = DbrInstanceInfo::fetch_all(&mut metadata_conn)?;
+    for info in all_instances {
+        instances.insert(DbrInstance::new(info));
     }
 
     let context = Context {
@@ -196,24 +196,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             const MYSQL_QUERY: &'static str = r#"SELECT id, name, album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock""#;
             const SQLITE_QUERY: &'static str = r#"SELECT id, name, album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock""#;
 
-            let result_set = match instance.info.module() {
-                StoreModule::Mysql => {
-                    MYSQL_QUERY
-                        .with(())
-                        .map(&mut connection, |(id, name, album_id)| Song {
-                            id,
-                            name,
-                            album_id,
-                        })
-                        .await?
-                }
-                StoreModule::SQLite => Vec::new(),
-            };
+            let result_set: Vec<Song>;
+            result_set = MYSQL_QUERY
+                .with(())
+                .map(&mut connection, |(id, name, album_id)| Song {
+                    id,
+                    name,
+                    album_id,
+                })
+                .await?;
 
             let mut active_records: Vec<Active<Song>> = Vec::new();
-            for song in result_set {
-                let id = song.id;
-                let record_ref = store.set_record(id, song)?;
+            for record in result_set {
+                let id = record.id;
+                let record_ref = instance.cache.set_record(id, record)?;
                 active_records.push(Active::<Song>::from_arc(id, record_ref));
             }
 

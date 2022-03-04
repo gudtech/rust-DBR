@@ -390,7 +390,7 @@ impl DbrInstanceInfo {
             user = self.username(),
             pass = self.password(),
             host = self.host(),
-            db = self.database()
+            db = self.database_name()
         ))
     }
 
@@ -404,6 +404,22 @@ impl DbrInstanceInfo {
 
     pub fn module(&self) -> &InstanceModule {
         &self.module
+    }
+
+    pub fn username(&self) -> &String {
+        &self.username
+    }
+
+    pub fn password(&self) -> &String {
+        &self.password
+    }
+
+    pub fn host(&self) -> &String {
+        &self.host
+    }
+
+    pub fn database_name(&self) -> &String {
+        &self.database_name
     }
 }
 
