@@ -96,6 +96,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    pub trait SongFields {
+        fn name(&self) -> Result<&String, DbrError>;
+        fn album_id(&self) -> Result<i64, DbrError>;
+    }
+
+    pub trait SetSongFields {
+        fn set_name(&mut self
+    }
+
+    impl SongFields for I
+    where
+        I: Iterator<Item = (AsRef<Active<Song>>, AsRef<String>)>
+    {
+    }
+
+    impl SongFields for Active<Song> {
+        fn name(&self) -> Result<String, DbrError> {
+            let snapshot = self.snapshot()?;
+            Ok(snapshot.name)
+        }
+        fn album_id(&self) -> Result<i64, DbrError> {
+            let snapshot = self.snapshot()?;
+            Ok(snapshot.album_id)
+        }
+        async fn set_name(&mut self, context: &Context, name: String) -> Result<(), DbrError> {
+            let mut connection = context.pool.get_conn().await?;
+            const MYSQL_QUERY: &'static str = r#"UPDATE song SET name = :name WHERE id = :id"#.exec(&mut connection);
+        }
+    }
+
     pub struct Context {
         client_id: Option<i64>,
         instances: DbrInstances,
@@ -123,6 +153,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pool: pool,
     };
 
+
+    // fetch!(&context, Song where album.artist.genre like '%math%');
     let songs = {
         async fn song_fetch_internal(context: &Context) -> Result<Vec<Active<Song>>, DbrError> {
             let mut connection = context.pool.get_conn().await?;
@@ -156,6 +188,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         song_fetch_internal(&context).await
     }?;
+
+    for song in songs {
+        song.set(Song {
+            id: song.id,
+            name: song.name,
+            album_id: song.album_id,
+        });
+
+        song.set_name(song.name.clone() + " asdf"); 
+        song.set_album_id(song.album_id); 
+    }
 
     dbg!(songs);
 

@@ -303,6 +303,7 @@ impl DbrTable for Artist {
 
 pub trait ArtistFields {
     fn name(&self) -> Result<String, DbrError>;
+    fn set_name(&mut self, name: String) -> Result<(), DbrError>;
 }
 
 impl ArtistFields for Active<Artist> {
