@@ -32,21 +32,30 @@ impl From<mysql_async::Error> for DbrError {
     }
 }
 
-// Implemented on structures that are seen as the working data of the database.
-//
-// Setting/getting fields from this is essentially like asking the database directly.
-pub trait ActiveModel {
-    type Model: Send + Sync + Sized + Clone + 'static;
+/// Implemented on structures that are seen as the working data of the database.
+///
+/// Setting/getting fields from this is essentially like asking the database directly.
+pub trait ActiveModel<T>
+where
+    T: Send + Sync + Sized + Clone + 'static,
+{
     fn id(&self) -> i64;
-    fn data(&self) -> &Arc<Mutex<RecordMetadata<Self::Model>>>;
-    fn snapshot(&self) -> Result<Self::Model, DbrError> {
+    fn data(&self) -> &Arc<Mutex<RecordMetadata<T>>>;
+    fn snapshot(&self) -> Result<T, DbrError> {
         let locked_record = self.data().lock().map_err(|_| DbrError::PoisonError)?;
         Ok(locked_record.clone().data)
     }
 }
 
-pub trait DbrTable {
-    type ActiveModel: ActiveModel;
+/// Portions of the record to be updated.
+pub trait UpdateModel<T> { }
+
+pub trait DbrTable
+where
+    Self: Send + Sync + Sized + Clone + 'static,
+{
+    type ActiveModel: ActiveModel<Self>;
+    type UpdateModel: UpdateModel<Self>;
     fn instance_handle() -> &'static str;
     fn table_name() -> &'static str;
 }
@@ -269,11 +278,10 @@ impl<T> Active<T> {
     }
 }
 
-impl<T> ActiveModel for Active<T>
+impl<T> ActiveModel<T> for Active<T>
 where
     T: Send + Sync + Sized + Clone + 'static,
 {
-    type Model = T;
     fn id(&self) -> i64 {
         self.id
     }
@@ -291,8 +299,20 @@ pub struct Artist {
     pub name: String,
 }
 
+pub struct UpdateArtist {
+    pub id: Option<i64>,
+    pub name: Option<String>,
+}
+
+impl UpdateModel<Artist> for UpdateArtist {
+    fn update(&self, context: &Context) -> Result<(), DbrError> {
+
+    }
+}
+
 impl DbrTable for Artist {
-    type ActiveModel = Active<Artist>;
+    type ActiveModel = Active<Self>;
+    type UpdateModel = UpdateArtist;
     fn instance_handle() -> &'static str {
         "ops"
     }
@@ -303,7 +323,7 @@ impl DbrTable for Artist {
 
 pub trait ArtistFields {
     fn name(&self) -> Result<String, DbrError>;
-    fn set_name(&mut self, name: String) -> Result<(), DbrError>;
+    //fn set_name(&mut self, name: String) -> Result<(), DbrError>;
 }
 
 impl ArtistFields for Active<Artist> {
