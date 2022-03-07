@@ -22,10 +22,7 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use mysql_async::prelude::*;
-use rust_dbr::query::queryable::{
-    Active, DbrError, DbrInstance, DbrInstances, DbrRecordCache, DbrTable, DbrInstanceInfo, ActiveModel,
-};
-
+use rust_dbr::query::queryable::*;
 
 #[derive(Debug, Clone)]
 pub struct Song {
@@ -58,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // let songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre = 'Something')?;
     // expands out to ->
-    let songs = {
+    let mut songs = {
         async fn song_fetch_internal(context: &Context) -> Result<Vec<Active<Song>>, DbrError> {
             let mut connection = context.pool.get_conn().await?;
             let instance = context
@@ -92,31 +89,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         song_fetch_internal(&context).await
     }?;
 
-    
-    let rootContext = dbr!();
-    let fooCo = rootContext.subContext('foo');
-    let trx = myContext.start_transaction();
-
-    let artists: Vec<Active<Song>> = fetch!(&trx, Artist where album.song.title like '%Baby%')?;
-for artist in artists {
-    println!("Artist: {artist.name}");
-    for album in artist.albums().await {
-        println!("\tAlbum: {album.name}");
-        for song in album.songs().await {
-            println!("\t\tSong: {song.name}");
-
-            let new_name = song.name().replace("baby", "child");
-            song.set_name(trx, new_name);
-        }
+    for song in &mut songs {
+        song.set_name(&context, "test").await?;
+        song.set_album_id(&context, 1).await?;
     }
-    trx.commit()
-}
+    //let rootContext = dbr!();
+    //let fooCo = rootContext.subContext("foo");
+    //let trx = myContext.start_transaction();
 
-    for song in songs {
-        song.set_name(song.name.clone() + " asdf"); 
-        song.set_album_id(song.album_id); 
-    }
+    //let artists: Vec<Active<Song>> = fetch!(&trx, Artist where album.song.title like "%Baby%")?;
+    /*
+       for artist in artists {
+           println!("Artist: {artist.name}");
+           for album in artist.albums().await {
+               println!("\tAlbum: {album.name}");
+               for song in album.songs().await {
+                   println!("\t\tSong: {song.name}");
 
+                   let new_name = song.name().replace("baby", "child");
+                   song.set_name(trx, new_name);
+               }
+           }
+           trx.commit()
+       }
+
+       for song in songs {
+           song.set_name(song.name()?.clone() + " asdf");
+           song.set_album_id(song.album_id());
+       }
+    */
     /*
         let song = Active::<Song>::create(&context, PartialSong {
             id: 1, // how should we express partials here?
@@ -124,7 +125,6 @@ for artist in artists {
             album_id: 1,
         });
     */
-
 
     dbg!(songs);
 
@@ -145,9 +145,21 @@ pub struct PartialSong {
     album_id: Option<i64>,
 }
 
+impl Default for PartialSong {
+    fn default() -> Self {
+        Self {
+            id: None,
+            name: None,
+            album_id: None,
+        }
+    }
+}
+
+impl PartialModel<Song> for PartialSong {}
+
 impl DbrTable for Song {
     type ActiveModel = Active<Song>;
-    type Partial = PartialSong;
+    type PartialModel = PartialSong;
     fn instance_handle() -> &'static str {
         "ops"
     }
@@ -158,32 +170,96 @@ impl DbrTable for Song {
 
 #[async_trait]
 pub trait SongFields {
-    fn name(&self) -> Result<&String, DbrError>;
-    fn album_id(&self) -> Result<&i64, DbrError>;
+    fn name(&self) -> Result<String, DbrError>;
+    fn album_id(&self) -> Result<i64, DbrError>;
 
-    async fn set_name(&mut self, name: String) -> Result<(), DbrError>;
+    async fn set(&mut self, context: &Context, song: PartialSong) -> Result<(), DbrError>;
+    async fn set_name<T: Into<String> + Send>(
+        &mut self,
+        context: &Context,
+        name: T,
+    ) -> Result<(), DbrError>;
+    async fn set_album_id<T: Into<i64> + Send>(
+        &mut self,
+        context: &Context,
+        album_id: T,
+    ) -> Result<(), DbrError>;
 }
 
 #[async_trait]
 impl SongFields for Active<Song> {
-    fn name(&self) -> Result<&String, DbrError> {
+    fn name(&self) -> Result<String, DbrError> {
         let snapshot = self.snapshot()?;
-        Ok(&snapshot.name)
+        Ok(snapshot.name)
     }
-    fn album_id(&self) -> Result<&i64, DbrError> {
+    fn album_id(&self) -> Result<i64, DbrError> {
         let snapshot = self.snapshot()?;
-        Ok(&snapshot.album_id)
+        Ok(snapshot.album_id)
     }
-    async fn set_name(&mut self, context: &Context, name: String) -> Result<(), DbrError> {
+    async fn set(&mut self, context: &Context, song: PartialSong) -> Result<(), DbrError> {
         let mut connection = context.pool.get_conn().await?;
-        const MYSQL_QUERY: &'static str = r#"UPDATE song SET name = :name WHERE id = :id"#;
+        let mut params: HashMap<String, mysql_async::Value> = HashMap::new();
+        let mut set_fields = Vec::new();
+        params.insert("id".to_owned(), self.id().into());
 
-        MYSQL_QUERY.
+        if let Some(id) = song.album_id {
+            params.insert("set_id".to_owned(), id.into());
+            set_fields.push("id = :set_id");
+        }
 
+        if let Some(name) = song.name {
+            params.insert("set_name".to_owned(), name.into());
+            set_fields.push("name = :set_name");
+        }
+
+        if let Some(album_id) = song.album_id {
+            params.insert("set_album_id".to_owned(), album_id.into());
+            set_fields.push("album_id = :set_album_id");
+        }
+
+        if params.len() == 0 {
+            return Ok(());
+        }
+
+        let MYSQL_QUERY = format!(
+            r#"UPDATE song SET {} WHERE id = :id"#,
+            set_fields.join(", ")
+        );
+        MYSQL_QUERY
+            .with(mysql::Params::Named(params))
+            .ignore(&mut connection)
+            .await?;
         Ok(())
     }
+    async fn set_name<T: Into<String> + Send>(
+        &mut self,
+        context: &Context,
+        name: T,
+    ) -> Result<(), DbrError> {
+        self.set(
+            context,
+            PartialSong {
+                name: Some(name.into()),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+    async fn set_album_id<T: Into<i64> + Send>(
+        &mut self,
+        context: &Context,
+        album_id: T,
+    ) -> Result<(), DbrError> {
+        self.set(
+            context,
+            PartialSong {
+                album_id: Some(album_id.into()),
+                ..Default::default()
+            },
+        )
+        .await
+    }
 }
-
 
 pub struct Context {
     client_id: Option<i64>,

@@ -47,15 +47,15 @@ where
     }
 }
 
-/// Portions of the record to be updated.
-pub trait UpdateModel<T> { }
+/// Portions of the record to be updated/created.
+pub trait PartialModel<T> {}
 
 pub trait DbrTable
 where
     Self: Send + Sync + Sized + Clone + 'static,
 {
     type ActiveModel: ActiveModel<Self>;
-    type UpdateModel: UpdateModel<Self>;
+    type PartialModel: PartialModel<Self>;
     fn instance_handle() -> &'static str;
     fn table_name() -> &'static str;
 }
@@ -67,6 +67,7 @@ pub enum InstanceModule {
     Unknown(String),
 }
 
+#[derive(Debug, Clone)]
 pub struct DbrInstances {
     // handle, tag -> dbr instance
     handle_tags: HashMap<(String, Option<String>), DbrInstanceId>,
@@ -299,20 +300,16 @@ pub struct Artist {
     pub name: String,
 }
 
-pub struct UpdateArtist {
+pub struct PartialArtist {
     pub id: Option<i64>,
     pub name: Option<String>,
 }
 
-impl UpdateModel<Artist> for UpdateArtist {
-    fn update(&self, context: &Context) -> Result<(), DbrError> {
-
-    }
-}
+impl PartialModel<Artist> for PartialArtist {}
 
 impl DbrTable for Artist {
     type ActiveModel = Active<Self>;
-    type UpdateModel = UpdateArtist;
+    type PartialModel = PartialArtist;
     fn instance_handle() -> &'static str {
         "ops"
     }
