@@ -225,10 +225,7 @@ impl SongFields for Active<Song> {
             r#"UPDATE song SET {} WHERE id = :id"#,
             set_fields.join(", ")
         );
-        MYSQL_QUERY
-            .with(mysql::Params::Named(params))
-            .ignore(&mut connection)
-            .await?;
+        connection.exec::<mysql_async::Row, _, _>(MYSQL_QUERY, mysql::Params::Named(params)).await?;
         Ok(())
     }
     async fn set_name<T: Into<String> + Send>(
