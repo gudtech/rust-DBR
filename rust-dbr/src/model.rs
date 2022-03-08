@@ -1,5 +1,5 @@
 
-use std::{ops::{Deref, DerefMut}, sync::{Mutex, Arc}};
+use std::{ops::{Deref, DerefMut}, sync::{Mutex, Arc, atomic::{AtomicI64, Ordering}}};
 
 use crate::prelude::*;
 
@@ -17,6 +17,10 @@ where
         Ok(locked_record.clone().data)
     }
     fn apply_partial<P: PartialModel<T>>(&self, partial: P) -> Result<(), DbrError> {
+        if let Some(id) = partial.id() {
+            return Err(DbrError::CannotSetID);
+        }
+
         let mut data = self.data().lock().map_err(|_| DbrError::PoisonError)?;
         partial.apply(&mut *data)?;
         Ok(())
@@ -33,6 +37,7 @@ pub trait PartialModel<T> {
     fn apply<R>(self, record: &mut R) -> Result<(), DbrError>
     where
         R: Deref<Target = T> + DerefMut;
+    fn id(&self) -> Option<i64>;
 }
 
 #[derive(Debug)]

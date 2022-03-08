@@ -213,7 +213,7 @@ pub trait SongFields {
     fn album_id(&self) -> Result<i64, DbrError>;
     fn likes(&self) -> Result<i64, DbrError>;
 
-    async fn set(&mut self, context: &Context, song: PartialSong) -> Result<(), DbrError>;
+    async fn set<P: PartialModel<Song>>(&mut self, context: &Context, song: P) -> Result<(), DbrError>;
     async fn set_name<T: Into<String> + Send>(
         &mut self,
         context: &Context,
@@ -245,7 +245,7 @@ impl SongFields for Active<Song> {
         let snapshot = self.snapshot()?;
         Ok(snapshot.likes)
     }
-    async fn set(&mut self, context: &Context, song: PartialSong) -> Result<(), DbrError> {
+    async fn set<P: PartialModel<Song>>(&mut self, context: &Context, song: P) -> Result<(), DbrError> {
         let mut connection = context.pool.get_conn().await?;
         let mut params: HashMap<String, mysql_async::Value> = HashMap::new();
         let mut set_fields = Vec::new();
@@ -253,12 +253,12 @@ impl SongFields for Active<Song> {
 
         let song_partial = song.clone();
 
-        if let Some(id) = song.id {
+        if let Some(id) = song.id() {
             params.insert("set_id".to_owned(), id.into());
             set_fields.push("id = :set_id");
         }
 
-        if let Some(name) = song.name {
+        if let Some(name) = song.name() {
             params.insert("set_name".to_owned(), name.into());
             set_fields.push("name = :set_name");
         }
