@@ -14,8 +14,8 @@ pub struct DbrRecordCache {
 
 #[derive(Debug, Clone)]
 pub struct RecordMetadata<T> {
-    update_time: u64,
-    data: T,
+    pub update_time: u64,
+    pub data: T,
 }
 
 impl<T> RecordMetadata<T> {

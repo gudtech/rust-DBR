@@ -1,4 +1,4 @@
-use rust_dbr::query::queryable::*;
+use rust_dbr::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use mysql::prelude::*;

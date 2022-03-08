@@ -1,6 +1,5 @@
 pub mod context;
 pub mod cache;
-pub mod query;
 pub mod error;
 pub mod model;
 pub mod table;

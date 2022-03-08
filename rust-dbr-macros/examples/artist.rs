@@ -4,11 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 //use dbr_sample_dataset::*;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    artist_example()
-}
-
-async fn artist_example() -> Result<(), DbrError> {
+async fn main() -> Result<(), DbrError> {
     //let root_context = DBRSampleDataSet::init_sample_dataset(); // Typically you would DBR::load_metadata("file or DB url")
     //let context = Context { client_id: None };
 
@@ -32,14 +28,14 @@ async fn artist_example() -> Result<(), DbrError> {
 }
 
 #[derive(DbrTable, Debug, Clone)]
-#[table = "artist"]
+#[table = "ops.artist"]
 pub struct Artist {
     id: i64,
     name: String,
 }
 
 #[derive(DbrTable, Debug, Clone)]
-#[table = "album"]
+#[table = "ops.album"]
 pub struct Album {
     id: i64,
     artist_id: i64,
@@ -48,7 +44,7 @@ pub struct Album {
 }
 
 #[derive(DbrTable, Debug, Clone)]
-#[table = "song"]
+#[table = "ops.song"]
 pub struct Song {
     id: i64,
     name: String,

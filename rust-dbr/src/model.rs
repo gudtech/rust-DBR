@@ -14,7 +14,7 @@ where
     fn data(&self) -> &Arc<Mutex<RecordMetadata<T>>>;
     fn snapshot(&self) -> Result<T, DbrError> {
         let locked_record = self.data().lock().map_err(|_| DbrError::PoisonError)?;
-        Ok(*locked_record.clone())
+        Ok(locked_record.clone().data)
     }
     fn apply_partial<P: PartialModel<T>>(&self, partial: P) -> Result<(), DbrError> {
         let mut data = self.data().lock().map_err(|_| DbrError::PoisonError)?;
@@ -30,7 +30,9 @@ where
 
 /// Portions of the record to be updated/created.
 pub trait PartialModel<T> {
-    fn apply<B: Deref<Target = T> + DerefMut>(self, record: &mut B) -> Result<(), DbrError>;
+    fn apply<R>(self, record: &mut R) -> Result<(), DbrError>
+    where
+        R: Deref<Target = T> + DerefMut;
 }
 
 #[derive(Debug)]

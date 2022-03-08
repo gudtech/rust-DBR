@@ -21,7 +21,7 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use mysql_async::prelude::*;
-use rust_dbr::query::queryable::*;
+use rust_dbr::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -88,8 +88,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let album_id = song.album_id()?;
         let likes = song.likes()?;
         dbg!(&id, &name, &album_id);
-        song.set_name(&context, song.name).await?;
-        song.set_album_id(&context, album_id).await?;
+        song.set_name(&context, song.name()?).await?;
+        song.set_album_id(&context, song.album_id()?).await?;
         dbg!(song.likes()?);
         song.set_likes(&context, song.likes()? + 1).await?;
     }
