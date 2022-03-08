@@ -13,3 +13,5 @@ pub mod prelude {
     pub use crate::instance::{DbrInstance, DbrInstanceInfo, DbrInstances, DbrInstanceId};
     pub use crate::model::{ActiveModel, PartialModel, Active};
 }
+
+pub use prelude::{DbrTable, DbrError, Context, Active, PartialModel, ActiveModel};

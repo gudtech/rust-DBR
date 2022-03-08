@@ -1241,6 +1241,7 @@ dependencies = [
  "async-trait",
  "futures",
  "lazy_static",
+ "mysql",
  "mysql_async",
  "proc-macro2",
  "quote",

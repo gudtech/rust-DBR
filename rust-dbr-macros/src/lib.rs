@@ -141,7 +141,7 @@ mod expand {
                 #partial_fields
             }
 
-            impl ::rust_dbr::prelude::PartialModel<#ident> for #partial_ident {
+            impl ::rust_dbr::PartialModel<#ident> for #partial_ident {
                 fn apply<R>(self, mut record: &mut R) -> Result<(), DbrError>
                 where
                     R: ::std::ops::Deref<Target = #ident> + ::std::ops::DerefMut,
@@ -151,17 +151,20 @@ mod expand {
                     } = self;
 
                     #(
-                        if let Some(#field_name) = #field_name {
-                            record.#field_name = #field_name;
+                        if let Some(#settable_field_name) = #settable_field_name {
+                            record.#settable_field_name = #settable_field_name;
                         }
                     )*
 
                     Ok(())
                 }
+                fn id(&self) -> Option<i64> {
+                    self.id
+                }
             }
 
-            impl ::rust_dbr::prelude::DbrTable for #ident {
-                type ActiveModel = Active<#ident>;
+            impl ::rust_dbr::DbrTable for #ident {
+                type ActiveModel = ::rust_dbr::Active<#ident>;
                 type PartialModel = #partial_ident;
                 fn instance_handle() -> &'static str {
                     #handle
@@ -174,7 +177,7 @@ mod expand {
             #[::async_trait::async_trait]
             #vis trait #fields_trait {
                 #(
-                    fn #getter_field_name(&self) -> Result<#getter_field_type, DbrError>;
+                    fn #getter_field_name(&self) -> Result<#getter_field_type, ::rust_dbr::DbrError>;
                 )*
 
                 async fn set(&mut self, context: &::rust_dbr::Context, partial: #partial_ident) -> Result<(), DbrError>;
@@ -184,22 +187,22 @@ mod expand {
                         &mut self,
                         context: &::rust_dbr::Context,
                         #settable_field_name: T,
-                    ) -> Result<(), DbrError>;
+                    ) -> Result<(), ::rust_dbr::DbrError>;
                 )*
             }
 
             #[::async_trait::async_trait]
-            impl #fields_trait for Active<#ident> {
+            impl #fields_trait for ::rust_dbr::Active<#ident> {
                 #(
-                    fn #getter_field_name(&self) -> Result<#getter_field_type, DbrError> {
+                    fn #getter_field_name(&self) -> Result<#getter_field_type, ::rust_dbr::DbrError> {
                         let snapshot = self.snapshot()?;
                         Ok(snapshot.#getter_field_name)
                     }
                 )*
 
-                async fn set(&mut self, context: &Context, partial: #partial_ident) -> Result<(), DbrError> {
+                async fn set(&mut self, context: &Context, partial: #partial_ident) -> Result<(), ::rust_dbr::DbrError> {
                     let mut connection = context.pool.get_conn().await?;
-                    let mut params: HashMap<String, mysql_async::Value> = HashMap::new();
+                    let mut params = ::std::collections::HashMap::<String, mysql_async::Value>::new();
                     let mut set_fields = Vec::new();
                     params.insert("id".to_owned(), self.id().into());
 
@@ -218,14 +221,15 @@ mod expand {
 
                     let MYSQL_QUERY = format!(
                         r#"UPDATE {} SET {} WHERE id = :id"#,
-                        stringify!(#table_name),
+                        #table_name,
                         set_fields.join(", ")
                     );
 
+                    use ::mysql_async::{prelude::Queryable};
                     connection
-                        .exec::<mysql_async::Row>(MYSQL_QUERY, mysql::Params::Named(params))
+                        .exec::<::mysql_async::Row, _, _>(MYSQL_QUERY, ::mysql_async::Params::Named(params))
                         .await?;
-                    self.apply_partial(partial_clone);
+                    self.apply_partial(partial_clone)?;
 
                     Ok(())
                 }
@@ -233,9 +237,9 @@ mod expand {
                 #(
                     async fn #setter_field_fn<T: Into<#setter_field_type> + Send>(
                         &mut self,
-                        context: &Context,
+                        context: &::rust_dbr::Context,
                         #settable_field_name: T,
-                    ) -> Result<(), DbrError> {
+                    ) -> Result<(), ::rust_dbr::DbrError> {
                         self.set(
                             context,
                             #partial_ident {
