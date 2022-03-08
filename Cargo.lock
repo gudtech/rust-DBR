@@ -1238,10 +1238,15 @@ dependencies = [
 name = "rust-dbr-macros"
 version = "0.1.0"
 dependencies = [
- "mysql",
+ "async-trait",
+ "futures",
+ "lazy_static",
+ "mysql_async",
  "quote",
+ "rust-dbr",
  "sqlite",
  "syn",
+ "tokio",
 ]
 
 [[package]]

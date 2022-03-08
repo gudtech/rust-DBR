@@ -7,7 +7,14 @@ edition = "2021"
 proc-macro = true
 
 [dependencies]
+rust-dbr = { path = "../rust-dbr" }
+
+syn = { version = "1.0.52", features = ["full", "extra-traits", "derive"] }
 quote = "1.0.7"
-syn = {version = "1.0.52", features = ["full", "extra-traits"]}
-mysql = "22.1.0"
+
+mysql_async = "0.29"
 sqlite = "0.26.0"
+lazy_static = "1.4"
+async-trait = "0.1.52"
+futures = "0.3"
+tokio = { version = "1.17", features = ["full"] }

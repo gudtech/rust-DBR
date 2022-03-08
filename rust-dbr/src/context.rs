@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use crate::query::queryable::{DbrInstances, DbrInstance};
+use crate::prelude::*;
 
 #[derive(Clone)]
 pub struct Context {
     client_id: Option<i64>,
     instances: DbrInstances,
 }
-
 
 impl Context {
     pub fn client_tag(&self) -> Option<String> {

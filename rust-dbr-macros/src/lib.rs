@@ -1,38 +1,43 @@
 use proc_macro::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::parse::{Parse, ParseStream, Parser, Result};
-use syn::{parse, parse_macro_input, punctuated::Punctuated, Ident, ItemStruct, LitStr, Token};
+use syn::{
+    parse, parse_macro_input, punctuated::Punctuated, DeriveInput, Ident, ItemStruct, LitStr, Token,
+};
 
-#[derive(Debug)]
-struct Args {
-    //pub table_name: LitStr,
-}
+#[proc_macro_derive(DbrTable, attributes(table, relation))]
+pub fn dbr(input: TokenStream) -> TokenStream {
+    let mut input = parse_macro_input!(input as DeriveInput);
 
-impl Parse for Args {
-    fn parse(input: ParseStream) -> Result<Self> {
-        Ok(Args {
-            //table_name: "test".into(),
-        })
-    }
-}
+    dbg!(&input.attrs);
+    let ident = input.ident.clone();
+    let partial_ident = format_ident!("Partial{}", input.ident.clone());
 
-#[proc_macro_attribute]
-pub fn dbr(args: TokenStream, input: TokenStream) -> TokenStream {
-    let mut item_struct = parse_macro_input!(input as ItemStruct);
-    let mut args = parse_macro_input!(args as Args);
+    let expanded = quote! {
+        pub struct #partial_ident {
 
-    if let syn::Fields::Named(ref mut fields) = item_struct.fields {
-        fields.named.push(
-            syn::Field::parse_named
-                .parse2(quote! { pub a: String })
-                .unwrap(),
-        );
-    }
+        }
 
-    return quote! {
-        #item_struct
-    }
-    .into();
+        impl ::rust_dbr::prelude::PartialModel<#ident> for #partial_ident {
+            fn apply() -> Result<(), DbrError> {
+                Ok(())
+            }
+        }
+
+        impl ::rust_dbr::prelude::DbrTable for #ident {
+            type ActiveModel = Active<#ident>;
+            type PartialModel = #partial_ident;
+            fn instance_handle() -> &'static str {
+                "ops"
+            }
+            fn table_name() -> &'static str {
+                "song"
+            }
+        }
+
+    };
+
+    TokenStream::from(expanded)
 }
 
 #[proc_macro]

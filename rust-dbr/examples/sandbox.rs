@@ -1,4 +1,3 @@
-#![feature(generic_associated_types)]
 //use rust_dbr::query::queryable::DbrObject;
 
 // #[dbr(table_name = "artist")]
@@ -23,13 +22,6 @@ use async_trait::async_trait;
 use futures::future::BoxFuture;
 use mysql_async::prelude::*;
 use rust_dbr::query::queryable::*;
-
-#[derive(Debug, Clone)]
-pub struct Song {
-    id: i64,
-    name: String,
-    album_id: i64,
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -63,16 +55,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .lookup_by_handle(Song::instance_handle().to_owned(), context.client_tag())
                 .ok_or(DbrError::MissingStore(Song::instance_handle().to_owned()))?;
 
-            const MYSQL_QUERY: &'static str = r#"SELECT song.id, song.name, song.album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Math rock""#;
+            const MYSQL_QUERY: &'static str = r#"SELECT song.id, song.name, song.album_id, song.likes FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Math rock""#;
             const SQLITE_QUERY: &'static str = r#"SELECT id, name, album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock""#;
 
             let result_set: Vec<Song>;
             result_set = MYSQL_QUERY
                 .with(())
-                .map(&mut connection, |(id, name, album_id)| Song {
+                .map(&mut connection, |(id, name, album_id, likes)| Song {
                     id,
                     name,
                     album_id,
+                    likes,
                 })
                 .await?;
 
@@ -90,8 +83,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }?;
 
     for song in &mut songs {
-        song.set_name(&context, "test").await?;
-        song.set_album_id(&context, 1).await?;
+        let id = song.id();
+        let name = song.name()?;
+        let album_id = song.album_id()?;
+        let likes = song.likes()?;
+        dbg!(&id, &name, &album_id);
+        song.set_name(&context, song.name).await?;
+        song.set_album_id(&context, album_id).await?;
+        dbg!(song.likes()?);
+        song.set_likes(&context, song.likes()? + 1).await?;
     }
     //let rootContext = dbr!();
     //let fooCo = rootContext.subContext("foo");
@@ -126,8 +126,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     */
 
-    dbg!(songs);
-
     // Dropped connection will go to the pool
     drop(conn);
 
@@ -138,24 +136,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// After this mark - all of this will be macro expansions
-pub struct PartialSong {
-    id: Option<i64>,
-    name: Option<String>,
-    album_id: Option<i64>,
+#[derive(Debug, Clone)]
+pub struct Song {
+    id: i64,
+    name: String,
+    album_id: i64,
+    likes: i64,
 }
-
-impl Default for PartialSong {
-    fn default() -> Self {
-        Self {
-            id: None,
-            name: None,
-            album_id: None,
-        }
-    }
-}
-
-impl PartialModel<Song> for PartialSong {}
 
 impl DbrTable for Song {
     type ActiveModel = Active<Song>;
@@ -168,10 +155,63 @@ impl DbrTable for Song {
     }
 }
 
+/// After this mark - all of this will be macro expansions
+#[derive(Debug, Clone)]
+pub struct PartialSong {
+    id: Option<i64>,
+    name: Option<String>,
+    album_id: Option<i64>,
+    likes: Option<i64>,
+}
+
+impl Default for PartialSong {
+    fn default() -> Self {
+        Self {
+            id: None,
+            name: None,
+            album_id: None,
+            likes: None,
+        }
+    }
+}
+
+impl PartialModel<Song> for PartialSong {
+    fn apply<B: std::ops::Deref<Target = Song> + std::ops::DerefMut>(
+        self,
+        mut record: &mut B,
+    ) -> Result<(), DbrError> {
+        let PartialSong {
+            id,
+            name,
+            album_id,
+            likes,
+        } = self;
+
+        if let Some(id) = id {
+            record.id = id;
+        }
+
+        if let Some(name) = name {
+            record.name = name;
+        }
+
+        if let Some(album_id) = album_id {
+            record.album_id = album_id;
+        }
+
+        if let Some(likes) = likes {
+            record.likes = likes;
+        }
+
+        Ok(())
+    }
+}
+
 #[async_trait]
 pub trait SongFields {
     fn name(&self) -> Result<String, DbrError>;
     fn album_id(&self) -> Result<i64, DbrError>;
+    fn likes(&self) -> Result<i64, DbrError>;
 
     async fn set(&mut self, context: &Context, song: PartialSong) -> Result<(), DbrError>;
     async fn set_name<T: Into<String> + Send>(
@@ -183,6 +223,11 @@ pub trait SongFields {
         &mut self,
         context: &Context,
         album_id: T,
+    ) -> Result<(), DbrError>;
+    async fn set_likes<T: Into<i64> + Send>(
+        &mut self,
+        context: &Context,
+        likes: T,
     ) -> Result<(), DbrError>;
 }
 
@@ -196,13 +241,19 @@ impl SongFields for Active<Song> {
         let snapshot = self.snapshot()?;
         Ok(snapshot.album_id)
     }
+    fn likes(&self) -> Result<i64, DbrError> {
+        let snapshot = self.snapshot()?;
+        Ok(snapshot.likes)
+    }
     async fn set(&mut self, context: &Context, song: PartialSong) -> Result<(), DbrError> {
         let mut connection = context.pool.get_conn().await?;
         let mut params: HashMap<String, mysql_async::Value> = HashMap::new();
         let mut set_fields = Vec::new();
         params.insert("id".to_owned(), self.id().into());
 
-        if let Some(id) = song.album_id {
+        let song_partial = song.clone();
+
+        if let Some(id) = song.id {
             params.insert("set_id".to_owned(), id.into());
             set_fields.push("id = :set_id");
         }
@@ -217,6 +268,11 @@ impl SongFields for Active<Song> {
             set_fields.push("album_id = :set_album_id");
         }
 
+        if let Some(likes) = song.likes {
+            params.insert("set_likes".to_owned(), likes.into());
+            set_fields.push("likes = :set_likes");
+        }
+
         if params.len() == 0 {
             return Ok(());
         }
@@ -225,7 +281,11 @@ impl SongFields for Active<Song> {
             r#"UPDATE song SET {} WHERE id = :id"#,
             set_fields.join(", ")
         );
-        connection.exec::<mysql_async::Row, _, _>(MYSQL_QUERY, mysql::Params::Named(params)).await?;
+
+        connection
+            .exec::<mysql_async::Row, _, _>(MYSQL_QUERY, mysql::Params::Named(params))
+            .await?;
+        self.apply_partial(song_partial)?;
         Ok(())
     }
     async fn set_name<T: Into<String> + Send>(
@@ -251,6 +311,20 @@ impl SongFields for Active<Song> {
             context,
             PartialSong {
                 album_id: Some(album_id.into()),
+                ..Default::default()
+            },
+        )
+        .await
+    }
+    async fn set_likes<T: Into<i64> + Send>(
+        &mut self,
+        context: &Context,
+        likes: T,
+    ) -> Result<(), DbrError> {
+        self.set(
+            context,
+            PartialSong {
+                likes: Some(likes.into()),
                 ..Default::default()
             },
         )
