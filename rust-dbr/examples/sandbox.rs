@@ -52,8 +52,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut connection = context.pool.get_conn().await?;
             let instance = context
                 .instances
-                .lookup_by_handle(Song::instance_handle().to_owned(), context.client_tag())
-                .ok_or(DbrError::MissingStore(Song::instance_handle().to_owned()))?;
+                .lookup_by_handle(Song::schema().to_owned(), context.client_tag())
+                .ok_or(DbrError::MissingStore(Song::schema().to_owned()))?;
 
             const MYSQL_QUERY: &'static str = r#"SELECT song.id, song.name, song.album_id, song.likes FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Math rock""#;
             const SQLITE_QUERY: &'static str = r#"SELECT id, name, album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock""#;
@@ -147,7 +147,7 @@ pub struct Song {
 impl DbrTable for Song {
     type ActiveModel = Active<Song>;
     type PartialModel = PartialSong;
-    fn instance_handle() -> &'static str {
+    fn schema() -> &'static str {
         "ops"
     }
     fn table_name() -> &'static str {

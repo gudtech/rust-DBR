@@ -7,6 +7,6 @@ where
 {
     type ActiveModel: ActiveModel<Self>;
     type PartialModel: PartialModel<Self>;
-    fn instance_handle() -> &'static str;
+    fn schema() -> &'static str;
     fn table_name() -> &'static str;
 }

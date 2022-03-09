@@ -15,8 +15,8 @@ pub struct DbrInstanceInfo {
     /// Database module type, e.g. `Mysql` for mysql/mariadb, `sqlite`, `postgres`
     module: InstanceModule,
 
-    /// Instance handle, e.g. `config`/`ops`/`constants`/`directory`
-    handle: String,
+    /// Instance schema, e.g. `config`/`ops`/`constants`/`directory`
+    schema: String,
 
     /// Type of instance, currently just `master` by default or `template` for template instance
     class: String,
@@ -61,7 +61,7 @@ impl DbrInstanceInfo {
                 };
 
                 DbrInstanceInfo {
-                    id, module, handle, class, tag, database_name, username, password, host, schema_id, database_file, read_only,
+                    id, module, schema: handle, class, tag, database_name, username, password, host, schema_id, database_file, read_only,
                 }
         })?;
         Ok(instances)
@@ -84,8 +84,12 @@ impl DbrInstanceInfo {
         ))
     }
 
-    pub fn handle(&self) -> &String {
-        &self.handle
+    pub fn id(&self) -> i64 {
+        self.id
+    }
+
+    pub fn schema(&self) -> &String {
+        &self.schema
     }
 
     pub fn class(&self) -> &String {
@@ -110,6 +114,10 @@ impl DbrInstanceInfo {
 
     pub fn database_name(&self) -> &String {
         &self.database_name
+    }
+
+    pub fn tag(&self) -> &Option<String> {
+        &self.tag
     }
 }
 
@@ -154,9 +162,9 @@ impl DbrInstances {
     }
 
     pub fn insert(&mut self, instance: DbrInstance) {
-        let id = DbrInstanceId(instance.info.id);
-        let handle = instance.info.handle.clone();
-        let tag = instance.info.tag.clone();
+        let id = DbrInstanceId(instance.info.id());
+        let handle = instance.info.schema().clone();
+        let tag = instance.info.tag().clone();
 
         self.instances.insert(id, Arc::new(instance));
         self.handle_tags.insert((handle, tag), id);
