@@ -1,4 +1,9 @@
-use std::{sync::{RwLock, Arc}, collections::{BTreeMap, HashMap}};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::{Arc, RwLock},
+};
+
+use sqlx::{Decode, FromRow, MySql};
 
 use crate::prelude::*;
 
@@ -6,9 +11,9 @@ use crate::prelude::*;
 ///
 /// Equivalent to the id of the dbr.dbr_instances table.
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DbrInstanceId(i64);
+pub struct DbrInstanceId(pub i64);
 
-#[derive(Debug, Clone)]
+#[derive(FromRow, Debug, Clone)]
 pub struct DbrInstanceInfo {
     id: i64,
 
@@ -47,23 +52,12 @@ lazy_static::lazy_static! {
 
 impl DbrInstanceInfo {
     /// Look up all the dbr instances in the metadata database, doesn't necessarily create connections for them.
-    pub fn fetch_all(metadata: &mut mysql::Conn) -> Result<Vec<DbrInstanceInfo>, DbrError> {
-        use mysql::prelude::Queryable;
+    pub async fn fetch_all<'c, E: sqlx::Executor<'c, Database = MySql>>(
+        executor: E,
+    ) -> Result<Vec<DbrInstanceInfo>, DbrError> {
+        let instances = sqlx::query_as(r"SELECT instance_id, module, handle, class, tag, dbname, username, password, host, schema_id, dbfile, readonly FROM dbr_instances")
+            .fetch_all(executor).await?;
 
-        let instances = metadata.query_map(
-            r"SELECT instance_id, module, handle, class, tag, dbname, username, password, host, schema_id, dbfile, readonly FROM dbr_instances",
-            |(id, module, handle, class, tag, database_name, username, password, host, schema_id, database_file, read_only)| {
-                let module: String = module;
-                let module = match module.trim().to_lowercase().as_str() {
-                    "mysql" => InstanceModule::Mysql,
-                    "sqlite" => InstanceModule::SQLite,
-                    unknown => InstanceModule::Unknown(unknown.to_owned()),
-                };
-
-                DbrInstanceInfo {
-                    id, module, schema: handle, class, tag, database_name, username, password, host, schema_id, database_file, read_only,
-                }
-        })?;
         Ok(instances)
     }
 
@@ -121,11 +115,13 @@ impl DbrInstanceInfo {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(sqlx::Type, Debug, Clone)]
+#[sqlx(type_name = "color")] // only for PostgreSQL to match a type definition
+#[sqlx(rename_all = "lowercase")]
 pub enum InstanceModule {
     Mysql,
     SQLite,
-    Unknown(String),
+    Postgres,
 }
 
 #[derive(Debug, Clone)]
@@ -143,22 +139,45 @@ impl DbrInstances {
         }
     }
 
-    pub fn lookup_by_id(&self, id: DbrInstanceId) -> Option<Arc<DbrInstance>> {
-        self.instances.get(&id).cloned()
+    pub fn lookup_by_id(&self, id: DbrInstanceId) -> Result<Arc<DbrInstance>, DbrError> {
+        self.instances
+            .get(&id)
+            .cloned()
+            .ok_or(DbrError::MissingInstance {
+                id: Some(id),
+                handle: None,
+                tag: None,
+            })
     }
 
     pub fn lookup_by_handle(
         &self,
         handle: String,
         tag: Option<String>,
-    ) -> Option<Arc<DbrInstance>> {
+    ) -> Result<Arc<DbrInstance>, DbrError> {
         let common_instance = self.handle_tags.get(&(handle.clone(), None));
-        let instance = self.handle_tags.get(&(handle, tag));
-        match (common_instance, instance) {
+        let instance = self.handle_tags.get(&(handle.clone(), tag.clone()));
+        let mut result = match (common_instance, instance) {
             (_, Some(id)) => self.lookup_by_id(*id),
             (Some(common_id), None) => self.lookup_by_id(*common_id),
-            _ => None,
+            _ => Err(DbrError::MissingInstance {
+                id: None,
+                handle: None,
+                tag: None,
+            }),
+        };
+
+        if let Err(DbrError::MissingInstance {
+            id: err_id,
+            handle: err_handle,
+            tag: err_tag,
+        }) = &mut result
+        {
+            *err_handle = Some(handle);
+            *err_tag = tag;
         }
+
+        result
     }
 
     pub fn insert(&mut self, instance: DbrInstance) {
@@ -172,9 +191,17 @@ impl DbrInstances {
 }
 
 #[derive(Debug)]
+pub enum Pool {
+    MySql(sqlx::Pool<sqlx::MySql>),
+    Sqlite(sqlx::Pool<sqlx::Sqlite>),
+    Disconnected,
+}
+
+#[derive(Debug)]
 pub struct DbrInstance {
     pub info: DbrInstanceInfo,
     pub cache: DbrRecordCache,
+    pub pool: Pool,
 }
 
 impl DbrInstance {
@@ -182,6 +209,7 @@ impl DbrInstance {
         Self {
             info: info,
             cache: DbrRecordCache::new(),
+            pool: Pool::Disconnected,
         }
     }
 }

@@ -23,15 +23,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } */
 
     let database_url = "mysql://devuser:password@localhost:3306/account_test";
+    let dbr_url = "mysql://devuser:password@localhost:3306/dbr";
 
-    let pool = mysql_async::Pool::new(database_url);
-    let mut conn = pool.get_conn().await?;
+    use sqlx::mysql::MySqlPool;
+
+    let pool = MySqlPool::connect(dbr_url).await?;
 
     let mut instances = DbrInstances::new();
 
-    let opts = mysql::Opts::from_url("mysql://devuser:password@localhost:3306/dbr")?;
-    let mut metadata_conn = mysql::Conn::new(opts)?;
-    let all_instances = DbrInstanceInfo::fetch_all(&mut metadata_conn)?;
+    let all_instances = DbrInstanceInfo::fetch_all(&pool).await?;
     for info in all_instances {
         instances.insert(DbrInstance::new(info));
     }
@@ -39,11 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context {
         client_id: Some(1),
         instances: instances,
-        pool: pool,
     };
 
-    let mut songs: Vec<Active<Song>> =
-        fetch!(&context, Song where album.artist.genre = "Something" and album.name = "asdf" order by id, name limit 1000)?;
+    let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre = "Something" and album.name = "asdf" order by id, name limit 1000)?;
     // expands out to ->
     /*
     let mut songs = {
@@ -83,20 +81,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }?;
     */
 
-    /*
-       for song in &mut songs {
-           let id = song.id();
-           let name = song.name()?;
-           let album_id = song.album_id()?;
-           let likes = song.likes()?;
-           dbg!(&id, &name, &album_id);
-           song.set_name(&context, song.name()?).await?;
-           song.set_album_id(&context, song.album_id()?).await?;
-           dbg!(song.likes()?);
-           song.set_likes(&context, song.likes()? + 1).await?;
-           dbg!(song.likes()?);
-       }
-    */
+    for song in &mut songs {
+        let id = song.id();
+        let name = song.name()?;
+        let album_id = song.album_id()?;
+        let likes = song.likes()?;
+        dbg!(&id, &name, &album_id);
+        song.set_name(&context, song.name()?).await?;
+        song.set_album_id(&context, song.album_id()?).await?;
+        dbg!(song.likes()?);
+        song.set_likes(&context, song.likes()? + 1).await?;
+        dbg!(song.likes()?);
+    }
 
     //context.shutdown().await?;
     Ok(())
@@ -119,10 +115,10 @@ pub struct Album {
     name: String,
     date_released: u64,
 }
+*/
 
 #[derive(DbrTable, Debug, Clone)]
 #[table = "ops.song"]
- */
 pub struct Song {
     id: i64,
     //#[relation(Album)]

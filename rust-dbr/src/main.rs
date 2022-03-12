@@ -1,14 +1,7 @@
 use rust_dbr::prelude::*;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    use mysql::prelude::*;
-    use mysql::*;
-
-    let opts = Opts::from_url("mysql://devuser:password@localhost:3306/dbr")?;
-    let mut metadata_conn = Conn::new(opts)?;
-    let instances = DbrInstanceInfo::fetch_all(&mut metadata_conn)?;
     //let sqlite = sqlite::open(":memory:");
-    dbg!(&instances);
 
     //let val: Vec<String> = conn.query("SHOW TABLES")?;
 

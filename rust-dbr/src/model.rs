@@ -1,5 +1,10 @@
-
-use std::{ops::{Deref, DerefMut}, sync::{Mutex, Arc, atomic::{AtomicI64, Ordering}}};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::{
+        atomic::{AtomicI64, Ordering},
+        Arc, Mutex,
+    },
+};
 
 use crate::prelude::*;
 

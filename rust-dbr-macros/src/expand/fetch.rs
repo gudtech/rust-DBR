@@ -1,10 +1,9 @@
-use proc_macro2::{TokenStream, Span};
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    Error, Expr, Ident, Result, Token,
-    LitStr, Lit,
+    Error, Expr, Ident, Lit, LitStr, Result, Token,
 };
 
 #[derive(Debug, Clone)]
@@ -83,9 +82,7 @@ pub struct FilterPathSegment {
 impl Parse for FilterPathSegment {
     fn parse(input: ParseStream) -> Result<Self> {
         let ident = input.parse::<Ident>()?;
-        Ok(FilterPathSegment {
-            ident,
-        })
+        Ok(FilterPathSegment { ident })
     }
 }
 
@@ -97,9 +94,7 @@ pub struct FilterPath {
 impl Parse for FilterPath {
     fn parse(input: ParseStream) -> Result<Self> {
         let segments = Punctuated::<FilterPathSegment, Token![.]>::parse_separated_nonempty(input)?;
-        Ok(FilterPath {
-            segments,
-        })
+        Ok(FilterPath { segments })
     }
 }
 
@@ -124,21 +119,20 @@ impl Parse for FilterValue {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct FilterExpr {
-    field: FilterValue,
+    path: FilterPath,
     eq: Token![=],
     value: FilterValue,
 }
 
 impl Parse for FilterExpr {
     fn parse(input: ParseStream) -> Result<Self> {
-        let field = input.parse::<FilterValue>()?;
+        let path = input.parse::<FilterPath>()?;
         let eq = input.parse::<Token![=]>()?;
         let value = input.parse::<FilterValue>()?;
 
-        Ok(FilterExpr { field, eq, value })
+        Ok(FilterExpr { path, eq, value })
     }
 }
 
@@ -195,5 +189,5 @@ impl Parse for LimitArgs {
 
 pub fn fetch(input: FetchInput) -> Result<TokenStream> {
     dbg!(&input.arguments);
-    Ok(quote! {Ok::<_, ::mysql_async::Error>(Vec::new())})
+    Ok(quote! {Ok::<_, ::rust_dbr::DbrError>(Vec::new())})
 }

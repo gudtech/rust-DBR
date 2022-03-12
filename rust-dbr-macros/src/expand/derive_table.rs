@@ -1,4 +1,3 @@
-
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, ToTokens};
 use syn::parse::{Parse, ParseStream, Parser, Result};
@@ -182,12 +181,15 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
             )*
 
             async fn set(&mut self, context: &Context, partial: #partial_ident) -> Result<(), ::rust_dbr::DbrError> {
+                let partial_clone = partial.clone();
+                let instance = context.instance_by_handle(#ident::schema().to_owned());
+
+                /*
                 let mut connection = context.pool.get_conn().await?;
                 let mut params = ::std::collections::HashMap::<String, mysql_async::Value>::new();
                 let mut set_fields = Vec::new();
                 params.insert("id".to_owned(), self.id().into());
 
-                let partial_clone = partial.clone();
 
                 #(
                     if let Some(#settable_field_name) = partial.#settable_field_name {
@@ -210,6 +212,8 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
                 connection
                     .exec::<::mysql_async::Row, _, _>(MYSQL_QUERY, ::mysql_async::Params::Named(params))
                     .await?;
+                */
+
                 self.apply_partial(partial_clone)?;
 
                 Ok(())

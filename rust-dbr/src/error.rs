@@ -1,3 +1,4 @@
+use crate::prelude::DbrInstanceId;
 
 #[derive(Debug)]
 pub enum DbrError {
@@ -8,8 +9,13 @@ pub enum DbrError {
     CannotSetID,
     RecordNotFetched(i64),
     MissingStore(String),
-    MysqlError(mysql::Error),
-    MysqlAsyncError(mysql_async::Error),
+    SqlxError(sqlx::Error),
+    PoolDisconnected,
+    MissingInstance {
+        id: Option<DbrInstanceId>,
+        handle: Option<String>,
+        tag: Option<String>,
+    },
 }
 impl std::fmt::Display for DbrError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
@@ -17,27 +23,42 @@ impl std::fmt::Display for DbrError {
             Self::DowncastError => write!(f, "downcast error"),
             Self::PoisonError => write!(f, "poisoned"),
             Self::UnregisteredType => write!(f, "tried to read unregistered type"),
-            Self::CannotSetID => write!(f, "setting the id of an active record is currently not allowed"),
+            Self::CannotSetID => write!(
+                f,
+                "setting the id of an active record is currently not allowed"
+            ),
             Self::RecordNotFetched(id) => write!(f, "record was not available: {}", id),
             Self::Unimplemented(value) => write!(f, "unimplemented {}", value),
             Self::MissingStore(store) => write!(f, "missing store '{}'", store),
 
-            Self::MysqlError(err) => write!(f, "mysql error: {}", err),
-            Self::MysqlAsyncError(err) => write!(f, "mysql async error: {}", err),
+            Self::SqlxError(err) => write!(f, "sqlx error: {}", err),
+            Self::PoolDisconnected => write!(f, "pool disconnected"),
+            Self::MissingInstance { id, handle, tag } => {
+                let ident = if let Some(id) = id {
+                    format!("{}", id.0)
+                } else {
+                    "".to_owned()
+                };
+
+                let mut extra = "".to_owned();
+                if let Some(handle) = handle {
+                    extra = format!("{}", handle);
+                }
+
+                if let Some(tag) = tag {
+                    extra = format!("{}::{}", extra, tag);
+                }
+
+                write!(f, "missing instance ({}, {})", ident, extra)
+            }
         }
     }
 }
 
 impl std::error::Error for DbrError {}
 
-impl From<mysql::Error> for DbrError {
-    fn from(err: mysql::Error) -> Self {
-        Self::MysqlError(err)
-    }
-}
-
-impl From<mysql_async::Error> for DbrError {
-    fn from(err: mysql_async::Error) -> Self {
-        Self::MysqlAsyncError(err)
+impl From<sqlx::Error> for DbrError {
+    fn from(err: sqlx::Error) -> Self {
+        Self::SqlxError(err)
     }
 }
