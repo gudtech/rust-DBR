@@ -6,6 +6,7 @@ use crate::prelude::*;
 pub struct Context {
     pub client_id: Option<i64>,
     pub instances: DbrInstances,
+    pub metadata: Metadata,
 }
 
 impl Context {

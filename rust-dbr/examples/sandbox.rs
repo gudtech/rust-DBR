@@ -21,7 +21,7 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use futures::future::BoxFuture;
 use rust_dbr::{instance::Pool, prelude::*};
-use sqlx::{FromRow, mysql::MySqlArguments, Arguments};
+use sqlx::{mysql::MySqlArguments, Arguments, FromRow};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -260,11 +260,15 @@ impl SongFields for Active<Song> {
                 }
 
                 if fields.len() == 0 {
-                    return Ok(())
+                    return Ok(());
                 }
 
                 arguments.add(self.id());
-                let query_str = format!("UPDATE {} SET {} WHERE id = ?", Song::table_name(), fields.join(" "));
+                let query_str = format!(
+                    "UPDATE {} SET {} WHERE id = ?",
+                    Song::table_name(),
+                    fields.join(" ")
+                );
                 let query = sqlx::query_with(&query_str, arguments);
                 query.execute(pool).await?;
             }

@@ -1,4 +1,4 @@
-use rust_dbr::prelude::*;
+use rust_dbr::{metadata::Metadata, prelude::*};
 use rust_dbr_macros::{fetch, DbrTable};
 //use dbr_sample_dataset::*;
 
@@ -26,6 +26,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dbr_url = "mysql://devuser:password@localhost:3306/dbr";
 
     let pool = sqlx::mysql::MySqlPool::connect(dbr_url).await?;
+    let connection = pool.acquire().await?;
+    let metadata = Metadata::fetch(connection).await?;
 
     let mut instances = DbrInstances::new();
 
@@ -39,6 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context {
         client_id: Some(1),
         instances: instances,
+        metadata: metadata,
     };
 
     dbg!();
@@ -47,35 +50,67 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut songs = {
         async fn __fetch_internal(context: &Context) -> Result<Vec<Active<Song>>, DbrError> {
             let instance = context.instance_by_handle(Song::schema().to_owned())?;
+            let schema = context
+                .metadata
+                .lookup_schema(SchemaIdentifier::Name(Song::schema().to_owned()))?;
+
+            let mut fields = Vec::new();
+            fields.push("id");
+            fields.push("name");
+            fields.push("album_id");
+            fields.push("likes");
+
+            let mut join = Vec::new();
+
+            {
+                let relation = context.metadata.find_relation(
+                    SchemaIdentifier::Name(Song::schema().to_owned()),
+                    TableIdentifier::Name(Song::table_name().to_owned()),
+                    TableIdentifier::Name("album".to_owned()),
+                )?;
+
+                let to_table = context.metadata.lookup_table(relation.to_table_id)?;
+                let to_field = context.metadata.lookup_field(relation.to_field_id)?;
+
+                let from_table = context.metadata.lookup_table(relation.from_table_id)?;
+                let from_field = context.metadata.lookup_field(relation.from_field_id)?;
+
+                let to_schema = context
+                    .metadata
+                    .lookup_schema(SchemaIdentifier::Id(to_table.schema_id))?;
+
+                let album_instance = context.instance_by_handle(to_schema.name.to_owned())?;
+
+                if instance.info.colocated(&album_instance.info) {
+                    join.push(format!(
+                        "JOIN {}.{} ON ({}.{} = {}.{}",
+                        album_instance.info.database_name(),
+                        to_table.name,
+                        to_table.name,
+                        to_field.name,
+                        from_table.name,
+                        from_field.name,
+                    ));
+                } else {
+                    // we need to do a subquery...
+                }
+            };
 
             let result_set: Vec<Song> = match &instance.pool {
                 Pool::MySql(pool) => {
-                    let query = "SELECT song.id, song.name, song.album_id, song.likes FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = \"Math Rock\"";
-                    sqlx::query_as(query)
-                        .fetch_all(pool)
-                        .await?
+                    let fields_select: Vec<_> = fields
+                        .iter()
+                        .map(|field| format!("{}.{}", Song::table_name(), field))
+                        .collect();
+                    let base_name =
+                        format!("{}.{}", instance.info.database_name(), Song::table_name());
+                    let query = format!("SELECT {} FROM {}", fields_select.join(", "), base_name);
+                    dbg!(&query);
+                    sqlx::query_as(&query).fetch_all(pool).await?
                 }
-                _ => {
-                    Vec::new()
-                },
+                _ => Vec::new(),
             };
-            //let relation = context.relation(Song::table_name(), "album");
 
-            /*
-            const MYSQL_QUERY: &'static str = r#"SELECT song.id, song.name, song.album_id, song.likes FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Math rock""#;
-            const SQLITE_QUERY: &'static str = r#"SELECT id, name, album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock""#;
-
-            let result_set: Vec<Song>;
-            result_set = MYSQL_QUERY
-                .with(())
-                .map(&mut connection, |(id, name, album_id, likes)| Song {
-                    id,
-                    name,
-                    album_id,
-                    likes,
-                })
-                .await?;
- */
             let mut active_records: Vec<Active<Song>> = Vec::new();
             for record in result_set {
                 let id = record.id;
@@ -85,7 +120,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             Ok(active_records)
         }
-        
+
         __fetch_internal(&context).await
     }?;
 

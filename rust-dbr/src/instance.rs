@@ -1,4 +1,5 @@
 use std::{
+    borrow::Borrow,
     collections::{BTreeMap, HashMap},
     sync::{Arc, RwLock},
 };
@@ -66,23 +67,32 @@ impl DbrInstanceInfo {
         Ok(instances)
     }
 
-    pub fn connection_uri(&self) -> Option<String> {
-        /*
-        let from = match self.module {
-            InstanceModule::MySql => "mysql",
-            InstanceModule::SQLite => "sqlite",
-            _ => return None,
-        }; */
-        let from = &self.module();
-
-        Some(format!(
-            "{from}://{user}:{pass}@{host}/{db}",
-            from = from,
+    pub fn connection_host_uri(&self) -> String {
+        format!(
+            "{from}://{user}:{pass}@{host}/",
+            from = self.module(),
             user = self.username(),
             pass = self.password(),
             host = self.host(),
+        )
+    }
+
+    pub fn connection_uri(&self) -> String {
+        format!(
+            "{uri}/{db}",
+            uri = self.connection_host_uri(),
             db = self.database_name()
-        ))
+        )
+    }
+
+    // Are these a part of the same database?
+    //
+    // We don't include the "schema" here because you can have cases like
+    // constants and directory being in the same database but a different schema.
+    //
+    // Probaby should check if this is fine.
+    pub fn colocated<O: Borrow<Self>>(&self, other: O) -> bool {
+        self.connection_host_uri() == other.borrow().connection_host_uri()
     }
 
     pub fn id(&self) -> u32 {
@@ -116,7 +126,7 @@ impl DbrInstanceInfo {
     pub fn host(&self) -> &String {
         &self.host
     }
-    
+
     pub fn set_host(&mut self, new_host: String) {
         self.host = new_host;
     }
@@ -220,7 +230,7 @@ pub struct DbrInstance {
 
 impl DbrInstance {
     pub async fn new(info: DbrInstanceInfo) -> Result<Self, DbrError> {
-        let uri = info.connection_uri().ok_or(DbrError::Unimplemented("connection uri failed".to_owned()))?;
+        let uri = info.connection_uri();
         dbg!(&uri);
         let pool = match info.module().as_str() {
             "mysql" => {

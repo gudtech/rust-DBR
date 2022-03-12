@@ -16,7 +16,9 @@ pub enum DbrError {
         handle: Option<String>,
         tag: Option<String>,
     },
+    MetadataError(crate::metadata::MetadataError),
 }
+
 impl std::fmt::Display for DbrError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match &self {
@@ -51,6 +53,7 @@ impl std::fmt::Display for DbrError {
 
                 write!(f, "missing instance ({}, {})", ident, extra)
             }
+            Self::MetadataError(err) => write!(f, "metadata error: {}", err),
         }
     }
 }
@@ -60,5 +63,11 @@ impl std::error::Error for DbrError {}
 impl From<sqlx::Error> for DbrError {
     fn from(err: sqlx::Error) -> Self {
         Self::SqlxError(err)
+    }
+}
+
+impl From<crate::metadata::MetadataError> for DbrError {
+    fn from(err: crate::metadata::MetadataError) -> Self {
+        Self::MetadataError(err)
     }
 }
