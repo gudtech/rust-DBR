@@ -181,38 +181,56 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
             )*
 
             async fn set(&mut self, context: &Context, partial: #partial_ident) -> Result<(), ::rust_dbr::DbrError> {
+                use ::sqlx::Arguments;
+
                 let partial_clone = partial.clone();
-                let instance = context.instance_by_handle(#ident::schema().to_owned());
+                let instance = context.instance_by_handle(#ident::schema().to_owned())?;
 
-                /*
-                let mut connection = context.pool.get_conn().await?;
-                let mut params = ::std::collections::HashMap::<String, mysql_async::Value>::new();
-                let mut set_fields = Vec::new();
-                params.insert("id".to_owned(), self.id().into());
+                match &instance.pool {
+                    ::rust_dbr::Pool::MySql(pool) => {
+                        let mut fields = Vec::new();
+                        let mut arguments = ::sqlx::mysql::MySqlArguments::default();
 
+                        #(
+                            if let Some(field) = partial.#settable_field_name {
+                                fields.push(format!("{} = ?", stringify!(#settable_field_name)));
+                                arguments.add(field);
+                            }
+                        )*
 
-                #(
-                    if let Some(#settable_field_name) = partial.#settable_field_name {
-                        params.insert(stringify!(#settable_field_name).to_owned(), #settable_field_name.into());
-                        set_fields.push(format!("{name} = :{name}", name = stringify!(#settable_field_name)));
+                        if fields.len() == 0 {
+                            return Ok(())
+                        }
+
+                        arguments.add(self.id());
+                        let query_str = format!("UPDATE {} SET {} WHERE id = ?", #ident::table_name(), fields.join(" "));
+                        let query = ::sqlx::query_with(&query_str, arguments);
+                        query.execute(pool).await?;
                     }
-                )*
+                    ::rust_dbr::Pool::Sqlite(pool) => {
+                        let mut fields = Vec::new();
+                        let mut arguments = ::sqlx::sqlite::SqliteArguments::default();
 
-                if params.len() == 0 {
-                    return Ok(());
+                        #(
+                            if let Some(field) = partial.#settable_field_name {
+                                fields.push(format!("{} = ?", stringify!(#settable_field_name)));
+                                arguments.add(field);
+                            }
+                        )*
+
+                        if fields.len() == 0 {
+                            return Ok(())
+                        }
+
+                        arguments.add(self.id());
+                        let query_str = format!("UPDATE {} SET {} WHERE id = ?", #ident::table_name(), fields.join(" "));
+                        let query = ::sqlx::query_with(&query_str, arguments);
+                        query.execute(pool).await?;
+                    }
+                    ::rust_dbr::Pool::Disconnected => {
+                        return Err(::rust_dbr::DbrError::PoolDisconnected);
+                    }
                 }
-
-                let MYSQL_QUERY = format!(
-                    r#"UPDATE {} SET {} WHERE id = :id"#,
-                    #table_name,
-                    set_fields.join(", ")
-                );
-
-                use ::mysql_async::{prelude::Queryable};
-                connection
-                    .exec::<::mysql_async::Row, _, _>(MYSQL_QUERY, ::mysql_async::Params::Named(params))
-                    .await?;
-                */
 
                 self.apply_partial(partial_clone)?;
 

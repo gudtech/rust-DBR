@@ -9,9 +9,9 @@ pub mod prelude {
     pub use crate::cache::{DbrRecordCache, RecordMetadata};
     pub use crate::context::Context;
     pub use crate::error::DbrError;
-    pub use crate::instance::{DbrInstance, DbrInstanceId, DbrInstanceInfo, DbrInstances};
+    pub use crate::instance::{DbrInstance, DbrInstanceId, DbrInstanceInfo, DbrInstances, Pool};
     pub use crate::model::{Active, ActiveModel, PartialModel};
     pub use crate::table::DbrTable;
 }
 
-pub use prelude::{Active, ActiveModel, Context, DbrError, DbrTable, PartialModel};
+pub use prelude::{Active, ActiveModel, Context, DbrError, DbrTable, PartialModel, Pool};
