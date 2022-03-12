@@ -25,15 +25,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let database_url = "mysql://devuser:password@localhost:3306/account_test";
     let dbr_url = "mysql://devuser:password@localhost:3306/dbr";
 
-    use sqlx::mysql::MySqlPool;
-
-    let pool = MySqlPool::connect(dbr_url).await?;
+    let pool = sqlx::mysql::MySqlPool::connect(dbr_url).await?;
 
     let mut instances = DbrInstances::new();
 
     let all_instances = DbrInstanceInfo::fetch_all(&pool).await?;
-    for info in all_instances {
-        instances.insert(DbrInstance::new(info));
+    for mut info in all_instances {
+        info.set_host("localhost:3306".to_owned());
+        let instance = DbrInstance::new(info).await?;
+        instances.insert(instance);
     }
 
     let context = Context {
@@ -41,21 +41,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         instances: instances,
     };
 
-    let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre = "Something" and album.name = "asdf" order by id, name limit 1000)?;
+    dbg!();
+    //let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre = "Something" and album.name = "asdf" order by id, name limit 1000)?;
     // expands out to ->
-    /*
     let mut songs = {
-        async fn song_fetch_internal(context: &Context) -> Result<Vec<Active<Song>>, DbrError> {
-            let mut connection = context.pool.get_conn().await?;
-            let instance = context
-                .instances
-                .lookup_by_handle(Song::schema().to_owned(), context.client_tag())
-                .ok_or(DbrError::MissingStore(Song::schema().to_owned()))?;
+        async fn __fetch_internal(context: &Context) -> Result<Vec<Active<Song>>, DbrError> {
+            let instance = context.instance_by_handle(Song::schema().to_owned())?;
 
+            let result_set: Vec<Song> = match &instance.pool {
+                Pool::MySql(pool) => {
+                    let query = "SELECT song.id, song.name, song.album_id, song.likes FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = \"Math Rock\"";
+                    sqlx::query_as(query)
+                        .fetch_all(pool)
+                        .await?
+                }
+                _ => {
+                    Vec::new()
+                },
+            };
+            //let relation = context.relation(Song::table_name(), "album");
+
+            /*
             const MYSQL_QUERY: &'static str = r#"SELECT song.id, song.name, song.album_id, song.likes FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Math rock""#;
             const SQLITE_QUERY: &'static str = r#"SELECT id, name, album_id FROM song JOIN album ON (song.album_id = album.id) JOIN artist ON (album.artist_id = artist.id) WHERE artist.genre = "Rock""#;
-
-            use mysql_async::prelude::*;
 
             let result_set: Vec<Song>;
             result_set = MYSQL_QUERY
@@ -67,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     likes,
                 })
                 .await?;
-
+ */
             let mut active_records: Vec<Active<Song>> = Vec::new();
             for record in result_set {
                 let id = record.id;
@@ -77,10 +85,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             Ok(active_records)
         }
-        song_fetch_internal(&context).await
+        
+        __fetch_internal(&context).await
     }?;
-    */
 
+    dbg!();
     for song in &mut songs {
         let id = song.id();
         let name = song.name()?;
@@ -117,7 +126,7 @@ pub struct Album {
 }
 */
 
-#[derive(DbrTable, Debug, Clone)]
+#[derive(DbrTable, sqlx::FromRow, Debug, Clone)]
 #[table = "ops.song"]
 pub struct Song {
     id: i64,

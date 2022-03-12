@@ -11,16 +11,18 @@ use crate::prelude::*;
 ///
 /// Equivalent to the id of the dbr.dbr_instances table.
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct DbrInstanceId(pub i64);
+pub struct DbrInstanceId(pub u32);
 
 #[derive(FromRow, Debug, Clone)]
 pub struct DbrInstanceInfo {
-    id: i64,
+    #[sqlx(rename = "instance_id")]
+    id: u32,
 
-    /// Database module type, e.g. `Mysql` for mysql/mariadb, `sqlite`, `postgres`
-    module: InstanceModule,
+    /// Database module type, e.g. `MySql`, `sqlite`, `postgres`
+    module: String,
 
     /// Instance schema, e.g. `config`/`ops`/`constants`/`directory`
+    #[sqlx(rename = "handle")]
     schema: String,
 
     /// Type of instance, currently just `master` by default or `template` for template instance
@@ -30,6 +32,7 @@ pub struct DbrInstanceInfo {
     tag: Option<String>,
 
     /// Parameters on connecting to the database
+    #[sqlx(rename = "dbname")]
     database_name: String,
     username: String,
     password: String,
@@ -40,8 +43,10 @@ pub struct DbrInstanceInfo {
     /// Could be useful for something in the future, but I'm not entirely sure yet.
     ///
     /// Feel free to move them above and add a comment if you think otherwise!
-    schema_id: i64,
+    schema_id: i32,
+    #[sqlx(rename = "dbfile")]
     database_file: Option<String>,
+    #[sqlx(rename = "readonly")]
     read_only: Option<bool>,
 }
 
@@ -62,11 +67,13 @@ impl DbrInstanceInfo {
     }
 
     pub fn connection_uri(&self) -> Option<String> {
+        /*
         let from = match self.module {
-            InstanceModule::Mysql => "mysql",
+            InstanceModule::MySql => "mysql",
             InstanceModule::SQLite => "sqlite",
             _ => return None,
-        };
+        }; */
+        let from = &self.module();
 
         Some(format!(
             "{from}://{user}:{pass}@{host}/{db}",
@@ -78,7 +85,7 @@ impl DbrInstanceInfo {
         ))
     }
 
-    pub fn id(&self) -> i64 {
+    pub fn id(&self) -> u32 {
         self.id
     }
 
@@ -90,8 +97,12 @@ impl DbrInstanceInfo {
         &self.class
     }
 
+    /*
     pub fn module(&self) -> &InstanceModule {
         &self.module
+    } */
+    pub fn module(&self) -> String {
+        self.module.to_owned().to_lowercase()
     }
 
     pub fn username(&self) -> &String {
@@ -105,6 +116,10 @@ impl DbrInstanceInfo {
     pub fn host(&self) -> &String {
         &self.host
     }
+    
+    pub fn set_host(&mut self, new_host: String) {
+        self.host = new_host;
+    }
 
     pub fn database_name(&self) -> &String {
         &self.database_name
@@ -116,10 +131,10 @@ impl DbrInstanceInfo {
 }
 
 #[derive(sqlx::Type, Debug, Clone)]
-#[sqlx(type_name = "color")] // only for PostgreSQL to match a type definition
+#[sqlx(type_name = "VARCHAR")]
 #[sqlx(rename_all = "lowercase")]
 pub enum InstanceModule {
-    Mysql,
+    MySql,
     SQLite,
     Postgres,
 }
@@ -194,7 +209,6 @@ impl DbrInstances {
 pub enum Pool {
     MySql(sqlx::Pool<sqlx::MySql>),
     Sqlite(sqlx::Pool<sqlx::Sqlite>),
-    Disconnected,
 }
 
 #[derive(Debug)]
@@ -205,11 +219,25 @@ pub struct DbrInstance {
 }
 
 impl DbrInstance {
-    pub fn new(info: DbrInstanceInfo) -> Self {
-        Self {
+    pub async fn new(info: DbrInstanceInfo) -> Result<Self, DbrError> {
+        let uri = info.connection_uri().ok_or(DbrError::Unimplemented("connection uri failed".to_owned()))?;
+        dbg!(&uri);
+        let pool = match info.module().as_str() {
+            "mysql" => {
+                let pool = sqlx::Pool::<sqlx::MySql>::connect(&uri).await?;
+                Pool::MySql(pool)
+            }
+            "sqlite" => {
+                let pool = sqlx::Pool::<sqlx::Sqlite>::connect(&uri).await?;
+                Pool::Sqlite(pool)
+            }
+            _ => return Err(DbrError::PoolDisconnected),
+        };
+
+        Ok(Self {
             info: info,
             cache: DbrRecordCache::new(),
-            pool: Pool::Disconnected,
-        }
+            pool: pool,
+        })
     }
 }

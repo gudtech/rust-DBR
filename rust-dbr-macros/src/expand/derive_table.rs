@@ -227,9 +227,6 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
                         let query = ::sqlx::query_with(&query_str, arguments);
                         query.execute(pool).await?;
                     }
-                    ::rust_dbr::Pool::Disconnected => {
-                        return Err(::rust_dbr::DbrError::PoolDisconnected);
-                    }
                 }
 
                 self.apply_partial(partial_clone)?;
