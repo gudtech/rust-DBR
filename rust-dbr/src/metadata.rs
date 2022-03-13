@@ -250,6 +250,7 @@ impl Metadata {
             None => Err(MetadataError::MissingSchema { schema: identifier }.into()),
         }
     }
+
     pub fn lookup_table(&self, table_id: TableId) -> Result<&Table, DbrError> {
         self.tables.get(&table_id).ok_or(
             MetadataError::MissingTable {

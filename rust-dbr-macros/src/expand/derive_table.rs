@@ -152,6 +152,9 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
             fn table_name() -> &'static str {
                 #table_name
             }
+            fn fields() -> Vec<&'static str> {
+                vec![#(stringify!(#field_name)),*]
+            }
         }
 
         #[::async_trait::async_trait]

@@ -69,14 +69,18 @@ impl Parse for FetchArguments {
 
 mod keyword {
     syn::custom_keyword!(and);
+    syn::custom_keyword!(or);
     syn::custom_keyword!(order);
     syn::custom_keyword!(by);
     syn::custom_keyword!(limit);
+
+    syn::custom_keyword!(like);
+    syn::custom_keyword!(not);
 }
 
 #[derive(Debug, Clone)]
 pub struct FilterPathSegment {
-    ident: Ident,
+    pub ident: Ident,
 }
 
 impl Parse for FilterPathSegment {
@@ -120,26 +124,68 @@ impl Parse for FilterValue {
 }
 
 #[derive(Debug, Clone)]
+pub enum FilterOp {
+    Eq(Token![=]),
+    NotEq(Token![!=]),
+    Like(keyword::like),
+    NotLike(keyword::not, keyword::like),
+}
+
+impl FilterOp {
+    fn as_sql(&self) -> String {
+        match self {
+            Self::Eq(_) => "=",
+            Self::NotEq(_) => "!=",
+            Self::Like(_) => "LIKE",
+            Self::NotLike(_, _) => "NOT LIKE",
+        }.to_owned()
+    }
+}
+
+impl Parse for FilterOp {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(Token![=]) {
+            let eq = input.parse::<Token![=]>()?;
+            Ok(FilterOp::Eq(eq))
+        } else if lookahead.peek(Token![!=]) {
+            let neq = input.parse::<Token![!=]>()?;
+            Ok(FilterOp::NotEq(neq))
+        } else if lookahead.peek(keyword::like) {
+            let like = input.parse::<keyword::like>()?;
+            Ok(FilterOp::Like(like))
+        } else if lookahead.peek(keyword::not) {
+            let not = input.parse::<keyword::not>()?;
+            let like = input.parse::<keyword::like>()?;
+            Ok(FilterOp::NotLike(not, like))
+        } else {
+            Err(input.error("expected `=`, `!=`, `like`, or `not like`"))
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct FilterExpr {
     path: FilterPath,
-    eq: Token![=],
-    value: FilterValue,
+    op: FilterOp,
+    //value: FilterValue,
+    value: Expr,
 }
 
 impl Parse for FilterExpr {
     fn parse(input: ParseStream) -> Result<Self> {
         let path = input.parse::<FilterPath>()?;
-        let eq = input.parse::<Token![=]>()?;
-        let value = input.parse::<FilterValue>()?;
+        let op = input.parse::<FilterOp>()?;
+        let value = input.parse::<Expr>()?;
 
-        Ok(FilterExpr { path, eq, value })
+        Ok(FilterExpr { path, op, value })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct WhereArgs {
-    keyword: Token![where],
-    filter_expressions: Punctuated<FilterExpr, keyword::and>,
+    pub keyword: Token![where],
+    pub filter_expressions: Punctuated<FilterExpr, keyword::and>,
 }
 
 impl Parse for WhereArgs {
@@ -188,6 +234,110 @@ impl Parse for LimitArgs {
 }
 
 pub fn fetch(input: FetchInput) -> Result<TokenStream> {
-    dbg!(&input.arguments);
-    Ok(quote! {Ok::<_, ::rust_dbr::DbrError>(Vec::new())})
+
+    let table = input.arguments.table;
+    let context = input.context;
+    let mut filters = Vec::new();
+
+    if let Some(filter) = input.arguments.filter {
+        for filter_expression in filter.filter_expressions.iter() {
+            let mut segments = filter_expression.path.segments.iter().collect::<Vec<_>>();
+            let op = filter_expression.op.as_sql();
+            let value_expr = &filter_expression.value;
+
+            // The last portion of a segment is the field.
+            let field = segments.pop()
+                .expect("I'm not sure how you managed to get a filter path parsed without a single field...");
+            let path = segments;
+
+            let field = field.ident.to_string();
+            let path: Vec<String> = path
+                .iter()
+                .map(|segment| segment.ident.to_string())
+                .collect();
+
+            filters.push(quote! {
+                {
+                    let mut path = ::std::collections::VecDeque::new();
+                    #(
+                        path.push_back(#path.to_owned());
+                    )*
+                    let (relations, filter) = context.lookup_relation_path(*base_table, RelationPath {
+                        relations: path,
+                        field: #field.to_owned(),
+                    })?;
+
+                    for relation in relations {
+                        let joined = context.join(relation)?;
+                        if let RelationJoin::Colocated(join) = joined {
+                            joins.push(join);
+                        }
+                    }
+
+                    filters.push(format!("{} {} ?", filter, #op));
+                    arguments.add(#value_expr);
+                }
+            });
+        }
+    }
+
+    let expanded = quote! {
+        {
+            async fn __fetch_internal(context: &Context) -> Result<Vec<::rust_dbr::Active<#table>>, ::rust_dbr::DbrError> {
+                use ::sqlx::Arguments;
+
+                let instance = context.instance_by_handle(#table::schema().to_owned())?;
+                let schema = context
+                    .metadata
+                    .lookup_schema(SchemaIdentifier::Name(#table::schema().to_owned()))?;
+                let base_table = schema.lookup_table_by_name(#table::table_name().to_owned())?;
+
+                let mut fields = #table::fields();
+                let mut joins = Vec::new();
+                let mut filters = Vec::new();
+                //let mut sqlite_arguments = SqliteArguments::new();
+                let mut arguments = ::sqlx::mysql::MySqlArguments::default();
+
+                #(
+                    #filters
+                )*
+
+                let result_set: Vec<#table> = match &instance.pool {
+                    Pool::MySql(pool) => {
+                        let fields_select: Vec<_> = fields
+                            .iter()
+                            .map(|field| format!("{}.{}", #table::table_name(), field))
+                            .collect();
+                        let base_name =
+                            format!("{}.{}", instance.info.database_name(), #table::table_name());
+                        let filters = format!("WHERE {}", filters.join(" AND "));
+                        let query = format!(
+                            "SELECT {} FROM {} {} {}",
+                            fields_select.join(", "),
+                            base_name,
+                            joins.join(" "),
+                            filters,
+                        );
+                        dbg!(&query);
+                        sqlx::query_as_with(&query, arguments)
+                            .fetch_all(pool).await?
+                    }
+                    _ => Vec::new(),
+                };
+
+                let mut active_records: Vec<Active<#table>> = Vec::new();
+                for record in result_set {
+                    let id = record.id;
+                    let record_ref = instance.cache.set_record(id, record)?;
+                    active_records.push(Active::<#table>::from_arc(id, record_ref));
+                }
+
+                Ok(active_records)
+            }
+
+            __fetch_internal(#context).await
+        }
+    };
+
+    Ok(TokenStream::from(expanded))
 }

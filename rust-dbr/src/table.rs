@@ -8,4 +8,5 @@ where
     type PartialModel: PartialModel<Self>;
     fn schema() -> &'static str;
     fn table_name() -> &'static str;
+    fn fields() -> Vec<&'static str>;
 }
