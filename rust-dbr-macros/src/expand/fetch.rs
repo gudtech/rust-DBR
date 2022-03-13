@@ -70,8 +70,12 @@ impl Parse for FetchArguments {
 mod keyword {
     syn::custom_keyword!(and);
     syn::custom_keyword!(or);
+
     syn::custom_keyword!(order);
     syn::custom_keyword!(by);
+    syn::custom_keyword!(asc);
+    syn::custom_keyword!(desc);
+
     syn::custom_keyword!(limit);
 
     syn::custom_keyword!(like);
@@ -202,17 +206,76 @@ impl Parse for WhereArgs {
 }
 
 #[derive(Debug, Clone)]
+pub enum OrderByDirection {
+    Asc(keyword::asc),
+    Desc(keyword::desc),
+}
+
+impl Parse for OrderByDirection {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(keyword::asc) {
+            let asc = input.parse::<keyword::asc>()?;
+            Ok(OrderByDirection::Asc(asc))
+        } else if lookahead.peek(keyword::desc) {
+            let desc = input.parse::<keyword::desc>()?;
+            Ok(OrderByDirection::Desc(desc))
+        } else {
+            Err(input.error("expected `asc` or `desc` ordering direction"))
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Key {
+    ident: Ident,
+    direction: Option<OrderByDirection>,
+}
+
+impl Parse for Key {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let ident = input.parse::<Ident>()?;
+        let lookahead = input.lookahead1();
+        let direction;
+        if lookahead.peek(keyword::asc) || lookahead.peek(keyword::desc) {
+            direction = Some(input.parse::<OrderByDirection>()?);
+        } else {
+            direction = None;
+        }
+
+        Ok(Key { ident, direction })
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct OrderByArgs {
     order: keyword::order,
     by: keyword::by,
-    keys: Punctuated<Ident, Token![,]>,
+    keys: Punctuated<Key, Token![,]>,
+}
+
+impl OrderByArgs {
+    pub fn as_sql(&self) -> String {
+        let mut keys = Vec::new();
+        for key in self.keys.iter() {
+            let direction = match &key.direction {
+                Some(OrderByDirection::Asc(_)) => " ASC",
+                Some(OrderByDirection::Desc(_)) => " DESC",
+                None => "",
+            };
+
+            keys.push(format!("{}{}", key.ident.to_string(), direction));
+        }
+
+        format!("ORDER BY {}", keys.join(", "))
+    }
 }
 
 impl Parse for OrderByArgs {
     fn parse(input: ParseStream) -> Result<Self> {
         let order = input.parse::<keyword::order>()?;
         let by = input.parse::<keyword::by>()?;
-        let keys = Punctuated::<Ident, Token![,]>::parse_separated_nonempty(input)?;
+        let keys = Punctuated::<Key, Token![,]>::parse_separated_nonempty(input)?;
 
         Ok(OrderByArgs { order, by, keys })
     }
@@ -281,6 +344,21 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
         }
     }
 
+    let order_by_str = if let Some(order_by) = input.arguments.order_by {
+        order_by.as_sql()
+    } else {
+        "".to_owned()
+    };
+
+    let (limit_str, limit_argument) = if let Some(limit) = input.arguments.limit {
+        let limit_expr = limit.limit_expr;
+        ("LIMIT ?".to_owned(), Some(quote! {
+            arguments.add(#limit_expr);
+        }))
+    } else {
+        ("".to_owned(), None)
+    };
+
     let expanded = quote! {
         {
             async fn __fetch_internal(context: &Context) -> Result<Vec<::rust_dbr::Active<#table>>, ::rust_dbr::DbrError> {
@@ -302,6 +380,8 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
                     #filters
                 )*
 
+                #limit_argument
+
                 let result_set: Vec<#table> = match &instance.pool {
                     Pool::MySql(pool) => {
                         let fields_select: Vec<_> = fields
@@ -312,11 +392,13 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
                             format!("{}.{}", instance.info.database_name(), #table::table_name());
                         let filters = format!("WHERE {}", filters.join(" AND "));
                         let query = format!(
-                            "SELECT {} FROM {} {} {}",
-                            fields_select.join(", "),
-                            base_name,
-                            joins.join(" "),
-                            filters,
+                            "SELECT {fields} FROM {table} {join} {where} {order} {limit}",
+                            fields = fields_select.join(", "),
+                            table = base_name,
+                            join = joins.join(" "),
+                            r#where = filters,
+                            order = #order_by_str,
+                            limit = #limit_str,
                         );
                         dbg!(&query);
                         sqlx::query_as_with(&query, arguments)
