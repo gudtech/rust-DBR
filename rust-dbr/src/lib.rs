@@ -8,12 +8,12 @@ pub mod table;
 
 pub mod prelude {
     pub use crate::cache::{DbrRecordCache, RecordMetadata};
-    pub use crate::context::Context;
+    pub use crate::context::{Context, RelationPath, RelationTableCount};
     pub use crate::error::DbrError;
     pub use crate::instance::{DbrInstance, DbrInstanceId, DbrInstanceInfo, DbrInstances, Pool};
     pub use crate::metadata::{
         Field, FieldIdentifier, Metadata, Relation, Schema, SchemaIdentifier, Table,
-        TableIdentifier,
+        TableIdentifier, RelationId
     };
     pub use crate::model::{Active, ActiveModel, PartialModel};
     pub use crate::table::DbrTable;
@@ -21,5 +21,5 @@ pub mod prelude {
 
 pub use prelude::{
     Active, ActiveModel, Context, DbrError, DbrTable, Metadata, PartialModel, Pool,
-    SchemaIdentifier, TableIdentifier,
+    SchemaIdentifier, TableIdentifier, RelationPath, RelationTableCount, RelationId,
 };

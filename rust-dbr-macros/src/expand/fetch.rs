@@ -1,16 +1,18 @@
+use std::collections::{HashSet, HashMap};
+
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    Error, Expr, Ident, Lit, LitStr, Result, Token,
+    Expr, Ident, Lit, Result, Token, token, Type,
 };
 
 #[derive(Debug, Clone)]
 pub struct FetchInput {
-    context: Expr,
-    comma: Token![,],
-    arguments: FetchArguments,
+    pub context: Expr,
+    pub comma: Token![,],
+    pub arguments: FetchArguments,
 }
 
 impl Parse for FetchInput {
@@ -122,7 +124,7 @@ impl Parse for FilterValue {
             let lit = input.parse::<Lit>()?;
             Ok(FilterValue::Lit(lit))
         } else {
-            Err(syn::Error::new(Span::call_site(), "unexpected token"))
+            Err(lookahead.error())
         }
     }
 }
@@ -163,7 +165,70 @@ impl Parse for FilterOp {
             let like = input.parse::<keyword::like>()?;
             Ok(FilterOp::NotLike(not, like))
         } else {
-            Err(input.error("expected `=`, `!=`, `like`, or `not like`"))
+            Err(lookahead.error())
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum FilterGroupOp {
+    And(keyword::and),
+    Or(keyword::or),
+}
+
+impl Parse for FilterGroupOp {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(keyword::and) {
+            Ok(FilterGroupOp::And(input.parse()?))
+        } else if lookahead.peek(keyword::or) {
+            Ok(FilterGroupOp::Or(input.parse()?))
+        } else {
+            Err(lookahead.error())
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum FilterGroup {
+    Group {
+        paren: Option<token::Paren>,
+        groups: Punctuated<FilterGroup, FilterGroupOp>,
+    },
+    Expr(FilterExpr),
+}
+
+impl Parse for FilterGroup {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let lookahead = input.lookahead1();
+        if lookahead.peek(token::Paren) {
+            let inner_group ;
+            let group_paren = syn::parenthesized!(inner_group in input);
+            let mut group = FilterGroup::parse(&inner_group)?;
+            if let FilterGroup::Group { ref mut paren, .. } = group {
+                *paren = Some(group_paren);
+            }
+            Ok(group)
+        } else {
+            let initial_expr = FilterExpr::parse(&input)?;
+            if FilterGroupOp::parse(&input.fork()).is_ok() {
+                let mut groups = Punctuated::new();
+                groups.push_value(FilterGroup::Expr(initial_expr));
+                
+                loop {
+                    if !FilterGroupOp::parse(&input.fork()).is_ok() {
+                        break;
+                    }
+                    let punct = input.parse()?;
+                    groups.push_punct(punct);
+                    let value = FilterGroup::parse(input)?;
+                    groups.push_value(value);
+                }
+
+                Ok(FilterGroup::Group { paren: None, groups })
+            } else {
+                Ok(FilterGroup::Expr(initial_expr))
+            }
         }
     }
 }
@@ -189,18 +254,14 @@ impl Parse for FilterExpr {
 #[derive(Debug, Clone)]
 pub struct WhereArgs {
     pub keyword: Token![where],
-    pub filter_expressions: Punctuated<FilterExpr, keyword::and>,
+    pub filter_group: FilterGroup,
 }
 
 impl Parse for WhereArgs {
     fn parse(input: ParseStream) -> Result<Self> {
-        let keyword = input.parse::<Token![where]>()?;
-        let filter_expressions =
-            Punctuated::<FilterExpr, keyword::and>::parse_separated_nonempty(input)?;
-
         Ok(WhereArgs {
-            keyword,
-            filter_expressions,
+            keyword: input.parse()?,
+            filter_group: input.parse()?,
         })
     }
 }
@@ -221,15 +282,15 @@ impl Parse for OrderByDirection {
             let desc = input.parse::<keyword::desc>()?;
             Ok(OrderByDirection::Desc(desc))
         } else {
-            Err(input.error("expected `asc` or `desc` ordering direction"))
+            Err(lookahead.error())
         }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Key {
-    ident: Ident,
-    direction: Option<OrderByDirection>,
+    pub ident: Ident,
+    pub direction: Option<OrderByDirection>,
 }
 
 impl Parse for Key {
@@ -249,9 +310,9 @@ impl Parse for Key {
 
 #[derive(Debug, Clone)]
 pub struct OrderByArgs {
-    order: keyword::order,
-    by: keyword::by,
-    keys: Punctuated<Key, Token![,]>,
+    pub order: keyword::order,
+    pub by: keyword::by,
+    pub keys: Punctuated<Key, Token![,]>,
 }
 
 impl OrderByArgs {
@@ -283,8 +344,8 @@ impl Parse for OrderByArgs {
 
 #[derive(Debug, Clone)]
 pub struct LimitArgs {
-    limit: keyword::limit,
-    limit_expr: Expr,
+    pub limit: keyword::limit,
+    pub limit_expr: Expr,
 }
 
 impl Parse for LimitArgs {
@@ -297,50 +358,47 @@ impl Parse for LimitArgs {
 }
 
 pub fn fetch(input: FetchInput) -> Result<TokenStream> {
-
     let table = input.arguments.table;
     let context = input.context;
-    let mut filters = Vec::new();
+    let mut filter_construct = Vec::new();
+    let mut filter_paths = Vec::new();
+
 
     if let Some(filter) = input.arguments.filter {
-        for filter_expression in filter.filter_expressions.iter() {
-            let mut segments = filter_expression.path.segments.iter().collect::<Vec<_>>();
-            let op = filter_expression.op.as_sql();
-            let value_expr = &filter_expression.value;
+        println!("{:?}", filter.filter_group);
+        match filter.filter_group {
+            FilterGroup::Expr(expr) => {
+                let mut segments = expr.path.segments.iter().collect::<Vec<_>>();
+                let op = expr.op.as_sql();
+                let value_expr = &expr.value;
 
-            // The last portion of a segment is the field.
-            let field = segments.pop()
-                .expect("I'm not sure how you managed to get a filter path parsed without a single field...");
-            let path = segments;
+                // The last portion of a segment is the field.
+                let field = segments.pop()
+                    .expect("I'm not sure how you managed to get a filter path parsed without a single field...");
+                let path = segments;
 
-            let field = field.ident.to_string();
-            let path: Vec<String> = path
-                .iter()
-                .map(|segment| segment.ident.to_string())
-                .collect();
+                let field = field.ident.to_string();
+                let path: Vec<String> = path
+                    .iter()
+                    .map(|segment| segment.ident.to_string())
+                    .collect();
 
-            filters.push(quote! {
-                {
-                    let mut path = ::std::collections::VecDeque::new();
-                    #(
-                        path.push_back(#path.to_owned());
-                    )*
-                    let (relations, filter) = context.lookup_relation_path(*base_table, RelationPath {
-                        relations: path,
+                let path = quote! {
+                    RelationPath {
+                        relations: vec![#( #path.to_owned() ),*].into(),
                         field: #field.to_owned(),
-                    })?;
-
-                    for relation in relations {
-                        let joined = context.join(relation)?;
-                        if let RelationJoin::Colocated(join) = joined {
-                            joins.push(join);
-                        }
                     }
+                };
 
-                    filters.push(format!("{} {} ?", filter, #op));
-                    arguments.add(#value_expr);
-                }
-            });
+                filter_paths.push(quote! {
+                    paths.push(#path);
+                });
+
+                filter_construct.push(quote! {
+                    let path = #path;
+                });
+            }
+            _ => {},
         }
     }
 
@@ -361,24 +419,24 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
 
     let expanded = quote! {
         {
-            async fn __fetch_internal(context: &Context) -> Result<Vec<::rust_dbr::Active<#table>>, ::rust_dbr::DbrError> {
+            async fn __fetch_internal(context: &::rust_dbr::Context) -> Result<Vec<::rust_dbr::Active<#table>>, ::rust_dbr::DbrError> {
                 use ::sqlx::Arguments;
 
                 let instance = context.instance_by_handle(#table::schema().to_owned())?;
                 let schema = context
                     .metadata
-                    .lookup_schema(SchemaIdentifier::Name(#table::schema().to_owned()))?;
+                    .lookup_schema(::rust_dbr::SchemaIdentifier::Name(#table::schema().to_owned()))?;
                 let base_table = schema.lookup_table_by_name(#table::table_name().to_owned())?;
 
                 let mut fields = #table::fields();
-                let mut joins = Vec::new();
-                let mut filters = Vec::new();
+                let mut joins: Vec<String> = Vec::new();
+                let mut filters: Vec<String> = Vec::new();
                 //let mut sqlite_arguments = SqliteArguments::new();
                 let mut arguments = ::sqlx::mysql::MySqlArguments::default();
+                let mut relations: Vec<::rust_dbr::RelationId> = Vec::new();
+                let mut paths: Vec<::rust_dbr::RelationPath> = Vec::new();
 
-                #(
-                    #filters
-                )*
+                #( #filter_paths )*
 
                 #limit_argument
 
@@ -390,7 +448,11 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
                             .collect();
                         let base_name =
                             format!("{}.{}", instance.info.database_name(), #table::table_name());
-                        let filters = format!("WHERE {}", filters.join(" AND "));
+                        let filters = if filters.len() > 0 {
+                            format!("WHERE {}", filters.join(" AND "))
+                        } else {
+                            "".to_owned()
+                        };
                         let query = format!(
                             "SELECT {fields} FROM {table} {join} {where} {order} {limit}",
                             fields = fields_select.join(", "),
