@@ -39,6 +39,7 @@ impl WhereArgs {
 pub enum FilterTree {
     Or {
         paren: Option<token::Paren>,
+        or: keyword::or,
         left: Box<FilterTree>,
         right: Box<FilterTree>,
     },
@@ -54,6 +55,7 @@ pub enum FilterTree {
 
 impl Parse for FilterTree {
     fn parse(input: ParseStream) -> Result<Self> {
+        dbg!("parse");
         let lookahead = input.lookahead1();
         if lookahead.peek(token::Paren) {
             dbg!("paren");
@@ -118,6 +120,7 @@ impl Parse for FilterTree {
             dbg!("or");
             Ok(FilterTree::Or {
                 paren: None,
+                or: input.parse()?,
                 left: Box::new(expr),
                 right: Box::new(input.parse()?),
             })
@@ -193,9 +196,9 @@ impl FilterPath {
 
 #[derive(Debug, Clone)]
 pub struct FilterExpr {
-    path: FilterPath,
-    op: FilterOp,
-    value: Expr,
+    pub path: FilterPath,
+    pub op: FilterOp,
+    pub value: Expr,
 }
 
 impl Parse for FilterExpr {
