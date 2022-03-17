@@ -61,7 +61,9 @@ impl TableRegistry {
         }
     }
 
-    pub fn table_instances(self) -> Vec<(RelationChain, (Option<JoinedTableIndex>, JoinedTableIndex))> {
+    pub fn table_instances(
+        self,
+    ) -> Vec<(RelationChain, (Option<JoinedTableIndex>, JoinedTableIndex))> {
         self.relation_hash.into_iter().collect()
     }
 
@@ -87,7 +89,8 @@ impl TableRegistry {
 
                 instance_count.0 += 1;
 
-                self.relation_hash.insert(chain.clone(), (previous_index, *instance_count));
+                self.relation_hash
+                    .insert(chain.clone(), (previous_index, *instance_count));
                 Ok((previous_index, *instance_count))
             }
         }
@@ -191,7 +194,7 @@ impl RelationChain {
         let mut clone = self.clone();
         if clone.chain.len() > 0 {
             // cut off the end part of the chain.
-            clone.chain = clone.chain[..clone.chain.len()-1].to_vec();
+            clone.chain = clone.chain[..clone.chain.len() - 1].to_vec();
         }
         clone
     }

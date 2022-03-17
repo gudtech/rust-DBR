@@ -37,7 +37,8 @@ pub struct ResolvedJoin {
 
 impl ResolvedJoin {
     pub fn as_sql(&self) -> String {
-        format!("JOIN {} ON ({}.{} = {}.{})",
+        format!(
+            "JOIN {} ON ({}.{} = {}.{})",
             self.to_table.instanced_with_schema(self.to_instance_index),
             self.from_table.instanced(self.from_instance_index),
             self.from_field.name,
@@ -85,9 +86,7 @@ impl ResolvedTable {
                     index = instance.to_string()
                 )
             }
-            _ => {
-                self.table.name.clone()
-            }
+            _ => self.table.name.clone(),
         }
     }
     pub fn instanced_with_schema(&self, instance: Option<JoinedTableIndex>) -> String {
@@ -156,9 +155,7 @@ impl<'a> Select<'a> {
         }
 
         let resolved_filters = match filters {
-            Some(filters) => {
-                Some(filters.resolve(context, table.id, &mut table_registry)?)
-            }
+            Some(filters) => Some(filters.resolve(context, table.id, &mut table_registry)?),
             None => None,
         };
 
@@ -348,7 +345,7 @@ impl<'a> FilterTree<'a> {
                         current_chain.push(relation.id);
 
                         // We only really care about the table index at the end of a relation chain.
-                        let (_from_index, to_index)  = registry.add(context, &current_chain)?;
+                        let (_from_index, to_index) = registry.add(context, &current_chain)?;
                         last_table_index = Some(to_index);
                     } else {
                         // we gots to do a subquery weeee
