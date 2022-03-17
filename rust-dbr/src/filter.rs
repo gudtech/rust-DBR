@@ -72,7 +72,7 @@ impl<'a> Select<'a> {
 
         let resolved_filters = match filters {
             Some(filters) => {
-                Some(filters.resolve(resolved_table.id, context, &mut table_registry)?)
+                Some(filters.resolve(context, resolved_table.id, &mut table_registry)?)
             }
             None => None,
         };
@@ -163,7 +163,7 @@ pub enum FilterTree<'a> {
     And {
         children: Vec<FilterTree<'a>>,
     },
-    Filter(FilterExpr<'a>),
+    Predicate(FilterPredicate<'a>),
 }
 
 pub enum FilterOp {
@@ -173,10 +173,10 @@ pub enum FilterOp {
     NotLike,
 }
 
-pub struct FilterExpr<'a> {
-    path: RelationPath,
-    op: FilterOp,
-    value: BindValue<'a>,
+pub struct FilterPredicate<'a> {
+    pub path: RelationPath,
+    pub op: FilterOp,
+    pub value: BindValue<'a>,
 }
 
 impl<'a> FilterTree<'a> {
@@ -223,24 +223,24 @@ impl<'a> FilterTree<'a> {
     /// to run subqueries if necessary.
     pub fn resolve(
         self,
-        base_table_id: TableId,
         context: &Context,
+        base_table_id: TableId,
         registry: &mut TableRegistry,
     ) -> Result<ResolvedFilterTree<'a>, DbrError> {
         match self {
             Self::Or { left, right } => Ok(ResolvedFilterTree::Or {
-                left: Box::new(left.resolve(base_table_id, context, registry)?),
-                right: Box::new(right.resolve(base_table_id, context, registry)?),
+                left: Box::new(left.resolve(context, base_table_id, registry)?),
+                right: Box::new(right.resolve(context, base_table_id, registry)?),
             }),
             Self::And { children } => {
                 let mut resolved = Vec::new();
                 for child in children {
-                    resolved.push(child.resolve(base_table_id, context, registry)?);
+                    resolved.push(child.resolve(context, base_table_id, registry)?);
                 }
 
                 Ok(ResolvedFilterTree::And { children: resolved })
             }
-            Self::Filter(expr) => {
+            Self::Predicate(expr) => {
                 let mut current_chain = RelationChain::new(base_table_id);
 
                 let mut from_table = context.metadata.lookup_table(base_table_id)?;
@@ -260,7 +260,7 @@ impl<'a> FilterTree<'a> {
                         current_chain.push(relation.id);
 
                         // We only really care about the table index at the end of a relation chain.
-                        let table_index = registry.add(context, &current_chain);
+                        let table_index = registry.add(context, &current_chain)?;
                         last_table_index = Some(table_index);
                     } else {
                         // we gots to do a subquery weeee
@@ -271,7 +271,7 @@ impl<'a> FilterTree<'a> {
                         subquery.fields.push(primary_key);
 
                         // Collect the rest of the relations and add it as a filter to the subquery, then resolve that.
-                        subquery.filters = Some(FilterTree::Filter(FilterExpr {
+                        subquery.filters = Some(FilterTree::Predicate(FilterPredicate {
                             path: RelationPath {
                                 base: to_table.id,
                                 relations: relation_walk.collect(),
@@ -282,7 +282,7 @@ impl<'a> FilterTree<'a> {
                         }));
 
                         let resolved_subquery = subquery.resolve(context)?;
-                        return Ok(ResolvedFilterTree::Filter(
+                        return Ok(ResolvedFilterTree::Predicate(
                             ResolvedFilter::ExternalSubquery(Box::new(resolved_subquery)),
                         ));
                     }
@@ -293,13 +293,14 @@ impl<'a> FilterTree<'a> {
                 let field_id = from_table.lookup_field(expr.path.field)?;
                 let field = context.metadata.lookup_field(*field_id)?;
 
-                let simple = ResolvedFilter::Predicate {
+                let predicate = ResolvedFilter::Predicate {
                     table: from_table.clone(),
                     table_index: last_table_index,
                     field: field.clone(),
                     value: expr.value,
                 };
-                Ok(ResolvedFilterTree::Filter(simple))
+
+                Ok(ResolvedFilterTree::Predicate(predicate))
             }
         }
     }
@@ -323,7 +324,7 @@ pub enum ResolvedFilterTree<'a> {
     And {
         children: Vec<ResolvedFilterTree<'a>>,
     },
-    Filter(ResolvedFilter<'a>),
+    Predicate(ResolvedFilter<'a>),
 }
 
 impl<'a> ResolvedFilterTree<'a> {
@@ -354,7 +355,7 @@ impl<'a> ResolvedFilterTree<'a> {
 
                 Some((sql.join(" AND "), args))
             }
-            Self::Filter(filter) => match filter {
+            Self::Predicate(filter) => match filter {
                 ResolvedFilter::ExternalSubquery(..) => None,
                 ResolvedFilter::Predicate {
                     table,

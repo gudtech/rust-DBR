@@ -75,7 +75,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: metadata,
     };
 
-    let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre like "math%" and (album.artist.genre like "%rock%" or album.id = 4))?;
+    let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre like "math%".to_string() and (album.artist.genre like "%rock%".to_string() or album.id = 4i64))?;
+    //let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre like "math%".to_string())?;
+    /*
     for song in &mut songs {
         let id = song.id();
         let name = song.name()?;
@@ -87,6 +89,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         song.set_likes(&context, song.likes()? + 1).await?;
         dbg!(&song.likes()?);
     }
+ */
 
     Ok(())
 }

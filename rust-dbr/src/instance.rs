@@ -70,7 +70,7 @@ impl DbrInstanceInfo {
 
     pub fn connection_host_uri(&self) -> String {
         format!(
-            "{from}://{user}:{pass}@{host}/",
+            "{from}://{user}:{pass}@{host}",
             from = self.module(),
             user = self.username(),
             pass = self.password(),

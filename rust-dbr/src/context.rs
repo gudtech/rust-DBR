@@ -47,6 +47,7 @@ pub struct Context {
 #[derive(Deref, Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
 pub struct QueryId(#[deref] u32);
 
+#[derive(Debug, Clone)]
 pub struct TableRegistry {
     instances: HashMap<TableId, JoinedTableIndex>,
     relation_hash: HashMap<RelationChain, JoinedTableIndex>,
@@ -60,17 +61,29 @@ impl TableRegistry {
         }
     }
 
-    pub fn add(&mut self, context: &Context, chain: &RelationChain) -> JoinedTableIndex {
+    pub fn add(&mut self, context: &Context, chain: &RelationChain) -> Result<JoinedTableIndex, DbrError> {
         match self.relation_hash.get(&chain) {
-            Some(index) => *index,
+            Some(index) => {
+                Ok(*index)
+            }
             None => {
+                let last_table = if chain.chain.len() > 0 {
+                    let last_relation_id = chain.chain[chain.chain.len()-1];
+                    let relation = context.metadata.lookup_relation(last_relation_id)?;
+                    relation.to_table_id
+                } else {
+                    chain.base
+                };
+
+                dbg!(&chain);
+                dbg!(&last_table);
                 let instance_count = self
                     .instances
-                    .entry(chain.base)
+                    .entry(last_table)
                     .or_insert(JoinedTableIndex(0));
                 instance_count.0 += 1;
                 self.relation_hash.insert(chain.clone(), *instance_count);
-                *instance_count
+                Ok(*instance_count)
             }
         }
     }

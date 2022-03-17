@@ -76,8 +76,30 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
     let context = input.context;
     //let mut filter_path = Vec::new();
 
-    if let Some(filter) = input.arguments.filter {
-        println!("{:?}", filter.filter_group);
+    let base_table_init = quote!{ let base_table = schema.lookup_table_by_name(#table::table_name().to_owned())?; };
+    let base_table_tokens = quote! { base_table };
+
+    let filter = match input.arguments.filter {
+        Some(filter) => {
+            dbg!(&filter.filter_tree);
+            let tokens = filter.filter_tree.as_filter_tree_tokens(&base_table_tokens);
+            //let mut tokens = None;
+            if let FilterTree::And { and, .. }  = filter.filter_tree {
+                let first = and.iter().next().unwrap();
+                /*
+                if let FilterTree::Expr { expr, ..} = first {
+                    tokens = Some(expr.as_filter_tokens(&base_table_tokens));
+                } */
+                //tokens = Some(first.as_filter_tree_tokens(&base_table_tokens));
+            }
+
+            Some(tokens)
+        }
+        None => None,
+    };
+
+
+        //filter.filter_tree.
         // Song where album.artist.genre like "math%" and (album.artist.genre like "%rock%" or album.id = 4)
         // expands to
         //
@@ -101,7 +123,6 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
         // AND (album1.id IN (...))
 
         // we need to have the sql take the table instance from the relation
-    }
 
     let order_by_str = if let Some(order_by) = input.arguments.order_by {
         order_by.as_sql()
@@ -130,7 +151,9 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
                 let schema = context
                     .metadata
                     .lookup_schema(::rust_dbr::SchemaIdentifier::Name(#table::schema().to_owned()))?;
-                let base_table = schema.lookup_table_by_name(#table::table_name().to_owned())?;
+                #base_table_init
+
+                let base_table_id = *#base_table_tokens;
 
                 let mut fields = #table::fields();
                 let mut joins: Vec<String> = Vec::new();
@@ -138,6 +161,15 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
                 let mut arguments = ::sqlx::mysql::MySqlArguments::default();
                 let mut relation_chains: Vec<Vec<::rust_dbr::RelationId>> = Vec::new();
                 let mut paths: Vec<::rust_dbr::RelationPath> = Vec::new();
+
+                let filter = #filter;
+
+                let mut registry = ::rust_dbr::TableRegistry::new();
+                let resolved = filter.resolve(context, base_table_id, &mut registry)?;
+                match resolved.as_sql() {
+                    Some((sql, args)) => { dbg!(sql); }
+                    _ => { dbg!("external subquery somewhere"); } 
+                };
 
                 #limit_argument
 

@@ -15,14 +15,14 @@ pub use super::prelude::*;
 #[derive(Debug, Clone)]
 pub struct WhereArgs {
     pub keyword: Token![where],
-    pub filter_group: FilterTree,
+    pub filter_tree: FilterTree,
 }
 
 impl Parse for WhereArgs {
     fn parse(input: ParseStream) -> Result<Self> {
         Ok(WhereArgs {
             keyword: input.parse()?,
-            filter_group: input.parse()?,
+            filter_tree: input.parse()?,
         })
     }
 }
@@ -47,18 +47,16 @@ pub enum FilterTree {
         paren: Option<token::Paren>,
         and: Punctuated<FilterTree, keyword::and>,
     },
-    Expr {
+    Predicate {
         paren: Option<token::Paren>,
-        expr: FilterExpr,
+        predicate: FilterPredicate,
     },
 }
 
 impl Parse for FilterTree {
     fn parse(input: ParseStream) -> Result<Self> {
-        dbg!("parse");
         let lookahead = input.lookahead1();
         if lookahead.peek(token::Paren) {
-            dbg!("paren");
             let inner_group;
             let group_paren = syn::parenthesized!(inner_group in input);
             let mut group = FilterTree::parse(&inner_group)?;
@@ -71,7 +69,7 @@ impl Parse for FilterTree {
                     *paren = Some(group_paren);
                     unnecessary = true;
                 }
-                Self::Expr { ref mut paren, .. } => {
+                Self::Predicate { ref mut paren, .. } => {
                     *paren = Some(group_paren);
                     unnecessary = true;
                 }
@@ -88,16 +86,15 @@ impl Parse for FilterTree {
             return Ok(group);
         }
 
-        let expr = FilterTree::Expr {
+        let predicate = FilterTree::Predicate {
             paren: None,
-            expr: input.parse()?,
+            predicate: input.parse()?,
         };
 
         let lookahead = input.lookahead1();
         if lookahead.peek(keyword::and) {
-            dbg!("and");
             let mut punctuated = Punctuated::default();
-            punctuated.push_value(expr);
+            punctuated.push_value(predicate);
 
             let and: keyword::and = input.parse()?;
             punctuated.push_punct(and);
@@ -117,16 +114,54 @@ impl Parse for FilterTree {
                 and: punctuated,
             })
         } else if lookahead.peek(keyword::or) {
-            dbg!("or");
             Ok(FilterTree::Or {
                 paren: None,
                 or: input.parse()?,
-                left: Box::new(expr),
+                left: Box::new(predicate),
                 right: Box::new(input.parse()?),
             })
         } else {
-            dbg!("expr");
-            Ok(expr)
+            Ok(predicate)
+        }
+    }
+}
+
+impl FilterTree {
+    pub fn as_filter_tree_tokens(&self, base_table_expr: &TokenStream) -> TokenStream {
+        match self {
+            Self::And {
+                and,
+                ..
+            } => {
+                let mut and_tokens = Vec::new();
+                for tree in and {
+                    and_tokens.push(tree.as_filter_tree_tokens(base_table_expr));
+                }
+
+                quote! {
+                    ::rust_dbr::FilterTree::And { children: vec![#(#and_tokens),*], }
+                }
+            }
+            Self::Or {
+                left,
+                right,
+                ..
+            } => {
+                let left = left.as_filter_tree_tokens(base_table_expr);
+                let right = right.as_filter_tree_tokens(base_table_expr);
+                quote! {
+                    ::rust_dbr::FilterTree::Or { left: Box::new(#left), right: Box::new(#right) }
+                }
+            }
+            Self::Predicate {
+                predicate,
+                ..
+            } => {
+                let filter_predicate = predicate.as_filter_tokens(base_table_expr);
+                quote! {
+                    ::rust_dbr::FilterTree::Predicate(#filter_predicate)
+                }
+            }
         }
     }
 }
@@ -181,46 +216,46 @@ impl FilterPath {
         self.field().ident.to_string()
     }
 
-    pub fn as_relation_path_tokens(&self, base_table_expr: Expr) -> TokenStream {
+    pub fn as_relation_path_tokens(&self, base_table_expr: &TokenStream) -> TokenStream {
         let relations_str = self.relations_str();
         let field_str = self.field_str();
         quote! {
-            RelationPath {
-                base_table: #base_table_expr,
-                path: vec![ #( #relations_str ),* ],
-                field: #field_str,
+            ::rust_dbr::RelationPath {
+                base: *#base_table_expr,
+                relations: vec![ #( #relations_str.to_owned() ),* ].into(),
+                field: #field_str.to_owned(),
             }
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct FilterExpr {
+pub struct FilterPredicate {
     pub path: FilterPath,
     pub op: FilterOp,
     pub value: Expr,
 }
 
-impl Parse for FilterExpr {
+impl Parse for FilterPredicate {
     fn parse(input: ParseStream) -> Result<Self> {
         let path = input.parse::<FilterPath>()?;
         let op = input.parse::<FilterOp>()?;
         let value = input.parse::<Expr>()?;
 
-        Ok(FilterExpr { path, op, value })
+        Ok(Self { path, op, value })
     }
 }
 
-impl FilterExpr {
-    pub fn as_filter_tokens(&self, base_table_expr: Expr) -> TokenStream {
+impl FilterPredicate {
+    pub fn as_filter_tokens(&self, base_table_expr: &TokenStream) -> TokenStream {
         let op_tokens = self.op.as_tokens();
         let path_tokens = self.path.as_relation_path_tokens(base_table_expr);
         let value_tokens = &self.value;
         quote! {
-            FilterExpr {
+            ::rust_dbr::FilterPredicate {
                 path: #path_tokens,
                 op: #op_tokens,
-                value: { use ::sqlx::Arguments; let mut args = ::sqlx::any::AnyArguments::default() args.add(#value_tokens); args },
+                value: { use ::sqlx::Arguments; let mut args = ::sqlx::any::AnyArguments::default(); args.add(#value_tokens); args },
             }
         }
     }

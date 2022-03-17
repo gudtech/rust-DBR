@@ -118,7 +118,7 @@ pub struct TableId(u32);
 
 #[derive(sqlx::Type, Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[sqlx(transparent)]
-pub struct RelationId(i32);
+pub struct RelationId(u32);
 
 // The metadata is effectively a tree, so lets just have all the data owned
 // in the top level with weak reference counted pointers internally.

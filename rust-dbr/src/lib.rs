@@ -20,10 +20,11 @@ pub mod prelude {
     };
     pub use crate::model::{Active, ActiveModel, PartialModel};
     pub use crate::table::DbrTable;
+    pub use crate::filter::{FilterTree, FilterPredicate, FilterOp, OrderDirection};
 }
 
 pub use prelude::{
     Active, ActiveModel, Context, DbrError, DbrTable, JoinedTableIndex, Metadata, PartialModel,
     Pool, RelationChain, RelationId, RelationPath, SchemaIdentifier, TableIdentifier,
-    TableRegistry,
+    TableRegistry, FilterTree, FilterPredicate, FilterOp, OrderDirection,
 };
