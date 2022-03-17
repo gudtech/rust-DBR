@@ -8,6 +8,8 @@ use syn::{
     Expr, Ident, Lit, Result, Token, token, Type,
 };
 
+pub use super::prelude::*;
+
 #[derive(Debug, Clone)]
 pub struct FetchInput {
     pub context: Expr,
@@ -67,21 +69,6 @@ impl Parse for FetchArguments {
             limit,
         })
     }
-}
-
-mod keyword {
-    syn::custom_keyword!(and);
-    syn::custom_keyword!(or);
-
-    syn::custom_keyword!(order);
-    syn::custom_keyword!(by);
-    syn::custom_keyword!(asc);
-    syn::custom_keyword!(desc);
-
-    syn::custom_keyword!(limit);
-
-    syn::custom_keyword!(like);
-    syn::custom_keyword!(not);
 }
 
 #[derive(Debug, Clone)]
@@ -294,119 +281,12 @@ impl FilterExpr {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct WhereArgs {
-    pub keyword: Token![where],
-    pub filter_group: FilterGroup,
-}
-
-impl Parse for WhereArgs {
-    fn parse(input: ParseStream) -> Result<Self> {
-        Ok(WhereArgs {
-            keyword: input.parse()?,
-            filter_group: input.parse()?,
-        })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum OrderByDirection {
-    Asc(keyword::asc),
-    Desc(keyword::desc),
-}
-
-impl Parse for OrderByDirection {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let lookahead = input.lookahead1();
-        if lookahead.peek(keyword::asc) {
-            let asc = input.parse::<keyword::asc>()?;
-            Ok(OrderByDirection::Asc(asc))
-        } else if lookahead.peek(keyword::desc) {
-            let desc = input.parse::<keyword::desc>()?;
-            Ok(OrderByDirection::Desc(desc))
-        } else {
-            Err(lookahead.error())
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Key {
-    pub ident: Ident,
-    pub direction: Option<OrderByDirection>,
-}
-
-impl Parse for Key {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let ident = input.parse::<Ident>()?;
-        let lookahead = input.lookahead1();
-        let direction;
-        if lookahead.peek(keyword::asc) || lookahead.peek(keyword::desc) {
-            direction = Some(input.parse::<OrderByDirection>()?);
-        } else {
-            direction = None;
-        }
-
-        Ok(Key { ident, direction })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct OrderByArgs {
-    pub order: keyword::order,
-    pub by: keyword::by,
-    pub keys: Punctuated<Key, Token![,]>,
-}
-
-impl OrderByArgs {
-    pub fn as_sql(&self) -> String {
-        let mut keys = Vec::new();
-        for key in self.keys.iter() {
-            let direction = match &key.direction {
-                Some(OrderByDirection::Asc(_)) => " ASC",
-                Some(OrderByDirection::Desc(_)) => " DESC",
-                None => "",
-            };
-
-            keys.push(format!("{}{}", key.ident.to_string(), direction));
-        }
-
-        format!("ORDER BY {}", keys.join(", "))
-    }
-}
-
-impl Parse for OrderByArgs {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let order = input.parse::<keyword::order>()?;
-        let by = input.parse::<keyword::by>()?;
-        let keys = Punctuated::<Key, Token![,]>::parse_separated_nonempty(input)?;
-
-        Ok(OrderByArgs { order, by, keys })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct LimitArgs {
-    pub limit: keyword::limit,
-    pub limit_expr: Expr,
-}
-
-impl Parse for LimitArgs {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let limit = input.parse::<keyword::limit>()?;
-        let limit_expr = input.parse::<Expr>()?;
-
-        Ok(LimitArgs { limit, limit_expr })
-    }
-}
-
 pub fn fetch(input: FetchInput) -> Result<TokenStream> {
     let table = input.arguments.table;
     let context = input.context;
     let mut filter_path = Vec::new();
     let mut filter_op = Vec::new();
     let mut filter_value = Vec::new();
-    let mut filter_format = None;
 
     if let Some(filter) = input.arguments.filter {
         println!("{:?}", filter.filter_group);
