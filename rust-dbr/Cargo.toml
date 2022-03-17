@@ -12,3 +12,4 @@ futures = "0.3"
 tokio = { version = "1.17", features = ["full"] }
 sqlx = { path = "../../sqlx", version = "0.5.11", features = ["any", "mysql", "sqlite", "runtime-tokio-rustls"] }
 derive_more = "0.99.17"
+solvent = "0.8.3"

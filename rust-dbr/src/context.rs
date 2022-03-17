@@ -61,6 +61,7 @@ impl TableRegistry {
         }
     }
 
+    /// We need this to be in the correct order.
     pub fn table_instances(
         self,
     ) -> Vec<(RelationChain, (Option<JoinedTableIndex>, JoinedTableIndex))> {
@@ -197,5 +198,9 @@ impl RelationChain {
             clone.chain = clone.chain[..clone.chain.len() - 1].to_vec();
         }
         clone
+    }
+
+    pub fn len(&self) -> usize {
+        self.chain.len()
     }
 }

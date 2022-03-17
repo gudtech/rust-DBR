@@ -27,6 +27,7 @@ pub struct Select<'a> {
 
 #[derive(Debug, Clone)]
 pub struct ResolvedJoin {
+    pub length: usize,
     pub from_table: ResolvedTable,
     pub from_field: Field,
     pub from_instance_index: Option<JoinedTableIndex>,
@@ -169,6 +170,7 @@ impl<'a> Select<'a> {
                 let to_field = context.metadata.lookup_field(relation.to_field_id)?;
 
                 joins.push(ResolvedJoin {
+                    length: chain.len(),
                     from_table: from_table.clone().resolve(context)?,
                     from_field: from_field.clone(),
                     from_instance_index: from_instance_index,
@@ -196,7 +198,7 @@ impl<'a> ResolvedSelect<'a> {
     ///
     /// This will return `DbrError::UnresolvedQuery` if there is an external subquery somewhere still.
     /// Those have to be run before the "parent" statement.
-    pub fn as_sql(self) -> Result<(String, BindValue<'a>), DbrError> {
+    pub fn as_sql(mut self) -> Result<(String, BindValue<'a>), DbrError> {
         use sqlx::Arguments;
         let mut arguments = BindValue::default();
         let schema_table = self.primary_table.instanced_with_schema(None);
@@ -216,6 +218,7 @@ impl<'a> ResolvedSelect<'a> {
         };
 
         let mut joins = Vec::new();
+        self.joins.sort_by(|a, b| a.length.cmp(&b.length));
         for join in self.joins {
             joins.push(join.as_sql());
         }
@@ -225,16 +228,18 @@ impl<'a> ResolvedSelect<'a> {
         let order = String::new();
         let limit = String::new();
 
+        let sql = format!(
+            "SELECT {fields} FROM {table} {joins} {where} {order} {limit}",
+            fields = fields,
+            table = schema_table,
+            joins = joins.join(" "),
+            r#where = filter_sql,
+            order = order,
+            limit = limit,
+        ).trim().to_owned();
+
         Ok((
-            format!(
-                "SELECT {fields} FROM {table} {joins} {where} {order} {limit}",
-                fields = fields,
-                table = schema_table,
-                joins = joins.join(" "),
-                r#where = filter_sql,
-                order = order,
-                limit = limit,
-            ),
+            sql,
             arguments,
         ))
     }
@@ -379,9 +384,10 @@ impl<'a> FilterTree<'a> {
                 let field = context.metadata.lookup_field(*field_id)?;
 
                 let predicate = ResolvedFilter::Predicate {
-                    table: from_table.clone(),
+                    table: from_table.resolve(context)?,
                     table_index: last_table_index,
                     field: field.clone(),
+                    op: expr.op,
                     value: expr.value,
                 };
 
@@ -394,9 +400,10 @@ impl<'a> FilterTree<'a> {
 pub enum ResolvedFilter<'a> {
     ExternalSubquery(Box<ResolvedSelect<'a>>),
     Predicate {
-        table: Table,
+        table: ResolvedTable,
         table_index: Option<JoinedTableIndex>,
         field: Field,
+        op: FilterOp,
         value: BindValue<'a>,
     },
 }
@@ -443,20 +450,41 @@ impl<'a> ResolvedFilterTree<'a> {
                     table,
                     table_index,
                     field,
+                    op,
                     value,
                 } => {
-                    let table_alias = match table_index {
-                        Some(index) => {
-                            format!("{table}{index}", table = table.name, index = *index)
+                    let table_alias = table.instanced(table_index);
+                    let sql = match op {
+                        FilterOp::Eq => {
+                            format!(
+                                "{table}.{field} = ?",
+                                table = table_alias,
+                                field = field.name
+                            )
                         }
-                        _ => table.name.clone(),
+                        FilterOp::NotEq => {
+                            format!(
+                                "{table}.{field} != ?",
+                                table = table_alias,
+                                field = field.name
+                            )
+                        }
+                        FilterOp::Like => {
+                            format!(
+                                "{table}.{field} LIKE ?",
+                                table = table_alias,
+                                field = field.name
+                            )
+                        }
+                        FilterOp::NotLike => {
+                            format!(
+                                "{table}.{field} NOT LIKE ?",
+                                table = table_alias,
+                                field = field.name
+                            )
+                        }
                     };
 
-                    let sql = format!(
-                        "{table}.{field} = ?",
-                        table = table_alias,
-                        field = field.name
-                    );
                     Ok((sql, value))
                 }
             },
