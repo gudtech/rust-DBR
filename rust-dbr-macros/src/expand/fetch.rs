@@ -233,6 +233,25 @@ impl Parse for FilterGroup {
     }
 }
 
+impl FilterGroup {
+    pub fn expressions(&self) -> Result<Vec<&FilterExpr>> {
+        match self {
+            FilterGroup::Group {
+                paren, groups,
+            } => {
+                let mut expressions = Vec::new();
+                for group in groups {
+                    expressions.extend(group.expressions()?);
+                }
+                Ok(expressions)
+            }
+            FilterGroup::Expr(expr) => {
+                Ok(vec![expr])
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FilterExpr {
     path: FilterPath,
@@ -248,6 +267,30 @@ impl Parse for FilterExpr {
         let value = input.parse::<Expr>()?;
 
         Ok(FilterExpr { path, op, value })
+    }
+}
+
+impl FilterExpr {
+    /// Every portion of the path aside from the field.
+    pub fn relations(&self) -> Vec<&FilterPathSegment> {
+        let segments = self.path.segments.iter().collect::<Vec<_>>();
+        if let Some((field, relations)) = segments.as_slice().split_last() {
+            relations.to_vec()
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn relations_str(&self) -> Vec<String> {
+        self.relations().iter().map(|relation| relation.ident.to_string()).collect()
+    }
+
+    pub fn field(&self) -> &FilterPathSegment {
+        self.path.segments.iter().last().expect("")
+    }
+
+    pub fn field_str(&self) -> String {
+        self.field().ident.to_string()
     }
 }
 
@@ -360,46 +403,51 @@ impl Parse for LimitArgs {
 pub fn fetch(input: FetchInput) -> Result<TokenStream> {
     let table = input.arguments.table;
     let context = input.context;
-    let mut filter_construct = Vec::new();
-    let mut filter_paths = Vec::new();
-
+    let mut filter_path = Vec::new();
+    let mut filter_op = Vec::new();
+    let mut filter_value = Vec::new();
+    let mut filter_format = None;
 
     if let Some(filter) = input.arguments.filter {
         println!("{:?}", filter.filter_group);
-        match filter.filter_group {
-            FilterGroup::Expr(expr) => {
-                let mut segments = expr.path.segments.iter().collect::<Vec<_>>();
-                let op = expr.op.as_sql();
-                let value_expr = &expr.value;
+        let expressions = filter.filter_group.expressions()?;
+        for expression in expressions {
+            let path_str = expression.relations_str();
+            let field_str = expression.field_str();
 
-                // The last portion of a segment is the field.
-                let field = segments.pop()
-                    .expect("I'm not sure how you managed to get a filter path parsed without a single field...");
-                let path = segments;
-
-                let field = field.ident.to_string();
-                let path: Vec<String> = path
-                    .iter()
-                    .map(|segment| segment.ident.to_string())
-                    .collect();
-
-                let path = quote! {
-                    RelationPath {
-                        relations: vec![#( #path.to_owned() ),*].into(),
-                        field: #field.to_owned(),
-                    }
-                };
-
-                filter_paths.push(quote! {
-                    paths.push(#path);
-                });
-
-                filter_construct.push(quote! {
-                    let path = #path;
-                });
-            }
-            _ => {},
+            filter_path.push(quote! {
+                RelationPath {
+                    path: vec![ #( #path_str ),* ],
+                    field: #field_str,
+                }
+            });
+            filter_op.push(expression.op.as_sql());
+            filter_value.push(expression.value.clone());
         }
+
+        // Song where album.artist.genre like "math%" and (album.artist.genre like "%rock%" or album.id = 4)
+        // expands to
+        //
+        // SELECT id FROM other.artist artist1
+        // WHERE
+        //      genre LIKE ? // "math%"
+        //
+        // SELECT id FROM other.artist artist1
+        // WHERE
+        //      genre LIKE ? // "%rock%"
+        //
+        // SELECT ... FROM account_test.song song1
+        // JOIN account_test.album album1 ON (song1.album_id = album1.id)
+        // #JOIN other.artist artist1 ON (album1.artist_id = artist1.id)
+        // WHERE
+        //      album1.artist_id IN (SELECT id FROM other.artist artist1 WHERE artist1.genre LIKE ? // "math%")
+        // AND (album1.artist_id IN (SELECT id FROM other.artist artist1 WHERE artist1.genre LIKE ? // "%rock%") OR album1.id = ?) // 4
+        //
+        //      artist1.genre LIKE ?
+        // AND (artist1.genre LIKE ? OR album1.id = ?)
+        // AND (album1.id IN (...))
+
+        // we need to have the sql take the table instance from the relation
     }
 
     let order_by_str = if let Some(order_by) = input.arguments.order_by {
@@ -431,12 +479,35 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
                 let mut fields = #table::fields();
                 let mut joins: Vec<String> = Vec::new();
                 let mut filters: Vec<String> = Vec::new();
-                //let mut sqlite_arguments = SqliteArguments::new();
                 let mut arguments = ::sqlx::mysql::MySqlArguments::default();
-                let mut relations: Vec<::rust_dbr::RelationId> = Vec::new();
+                let mut relation_chains: Vec<Vec<::rust_dbr::RelationId>> = Vec::new();
                 let mut paths: Vec<::rust_dbr::RelationPath> = Vec::new();
 
-                #( #filter_paths )*
+                async fn __fetch_recurse(where_tree: WhereTree, context: &::rust_dbr::Context) -> Result<Vec<::rust_dbr::Active<#table>>, ::rust_dbr::DbrError> {
+                }
+
+                let mut registry = QueryRegistry::default();
+                #( registry.add(context.relation_chain_from_path(#filter_path)?, #filter_op, #filter_value); )*
+
+                let relation_table_count = context.relation_table_count(relation_chains)?;
+                for (table, count) in relation_table_count.table_counts {
+                    for index in 0..count {
+
+                    }
+                }
+
+                #(
+                    let chain = context.relation_chain_from_path(#filter_path)?;
+                    match RelationChain::as_sql(relation_table_count)? {
+                        // if we are colocated we are fine and can just add to the filter list normally.
+                        RelationChain::Colocated(filter) => {
+                            joins.push(join);
+                        }
+                        RelationChain::Subquery(subquery) => {
+
+                        }
+                    }
+                )*
 
                 #limit_argument
 
@@ -485,3 +556,44 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
 
     Ok(TokenStream::from(expanded))
 }
+
+
+/*
+
+        match filter.filter_group {
+            FilterGroup::Expr(expr) => {
+                let mut segments = expr.path.segments.iter().collect::<Vec<_>>();
+                let op = expr.op.as_sql();
+                let value_expr = &expr.value;
+
+                // The last portion of a segment is the field.
+                let field = segments.pop()
+                    .expect("I'm not sure how you managed to get a filter path parsed without a single field...");
+                let path = segments;
+
+                let field = field.ident.to_string();
+                let path: Vec<String> = path
+                    .iter()
+                    .map(|segment| segment.ident.to_string())
+                    .collect();
+
+                let path = quote! {
+                    RelationPath {
+                        relations: vec![#( #path.to_owned() ),*].into(),
+                        field: #field.to_owned(),
+                    }
+                };
+
+                filter_paths.push(quote! {
+                    paths.push(#path);
+                });
+
+                filter_construct.push(quote! {
+                    let path = #path;
+                });
+
+                (path, op, value_expr)
+            }
+            _ => {},
+        }
+*/

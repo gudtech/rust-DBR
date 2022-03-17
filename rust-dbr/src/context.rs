@@ -1,5 +1,6 @@
 use std::collections::{VecDeque, HashMap, HashSet};
 use std::sync::Arc;
+use derive_more::Deref;
 
 use crate::{metadata::{TableId, RelationId, FieldId}, prelude::*};
 
@@ -18,6 +19,7 @@ pub struct RelationPath {
 /// where the second join is an alias.
 #[derive(Debug, Clone)]
 pub struct RelationTableCount {
+    pub table_counts: HashMap<TableId, JoinedTableId>,
     pub chains: HashMap<Vec<RelationId>, (TableId, JoinedTableId)>
 }
 
@@ -51,6 +53,102 @@ pub struct Context {
     pub metadata: Metadata,
 }
 
+#[derive(Deref, Debug, Copy, Clone, Hash, Eq, PartialEq, Ord, PartialOrd)]
+pub struct QueryId(#[deref] u32);
+
+pub struct TableRegistry {
+    table_instances: HashMap<TableId, JoinedTableId>,
+    relation_hash: HashMap<Vec<RelationId>, (TableId, JoinedTableId)>,
+}
+
+impl TableRegistry {
+    pub fn new() -> Self {
+        Self {
+            table_instances: HashMap::new(),
+            relation_hash: HashMap::new(),
+        }
+    }
+
+    pub fn add(&mut self, last_relation: &Relation, chain: &Vec<RelationId>) {
+        assert!(chain.len() > 0);
+        assert_eq!(Some(last_relation.id), chain.get(chain.len()-1).cloned());
+
+        let last_table = last_relation.to_table_id;
+        if !self.relation_hash.contains_key(chain) {
+            // we don't have this relation,
+            // lets mark it down and give it a unique number so it can be referenced
+            // in the `WHERE` clause and such.
+            let table_instance_count = self.table_instances.entry(last_table).or_insert(JoinedTableId(0));
+            table_instance_count.0 += 1;
+            self.relation_hash.insert(chain.clone(), (last_table, *table_instance_count));
+        }
+    }
+}
+
+pub struct QueryRegistry<'a> {
+    queries: HashMap<QueryId, TableRegistry>,
+
+    // Every time the relation is disconnected, we need another query.
+    relation_to_query: HashMap<Vec<RelationId>, QueryId>,
+    query_count: u32,
+    context: &'a Context,
+}
+
+impl<'a> QueryRegistry<'a> {
+    pub fn new(context: &'a Context) -> Self {
+        let mut registry = Self {
+            queries: HashMap::new(),
+            relation_to_query: HashMap::new(),
+            query_count: 0,
+            context,
+        };
+
+        registry.add_query();
+        registry
+    }
+
+    pub fn add_query(&mut self) -> QueryId {
+        self.query_count += 1;
+        let new_id = QueryId(self.query_count);
+        self.queries.insert(new_id, TableRegistry::new());
+        new_id
+    }
+
+    /// Figure out a consensus on which joins should be used for which relations.
+    pub fn add_relation_chain(&mut self, relation_chain: Vec<RelationId>) -> Result<(), DbrError> {
+        // We need to reduce relations -> table instances.
+        // For example we might have 2 relations to the same table
+        // or if we have multiple relations that converge to the same table
+        // then we need to differentiate.
+
+        for index in 0..relation_chain.len() {
+            // Walk up the relation id chain.
+            let mut query_id = QueryId(0);
+            if index > 0 {
+                // Start with whichever query the previous relation was on.
+                let previous_chain = relation_chain[0..index - 1].to_vec();
+                if let Some(previous_query_id) = self.relation_to_query.get(&previous_chain) {
+                    query_id = *previous_query_id;
+                }
+            }
+
+            let current_chain = relation_chain[0..index].to_vec();
+            let last_relation = self.context.metadata.lookup_relation(relation_chain[index])?;
+            
+            // The query is not on the same host so we need to do a subquery.
+            if !self.context.is_colocated(last_relation)? {
+                query_id = self.add_query();
+            }
+
+            let table_registry = self.queries.get_mut(&query_id).expect("query somehow didn't exist?");
+            table_registry.add(last_relation, &current_chain);
+            self.relation_to_query.insert(current_chain, query_id);
+        }
+
+        Ok(())
+    }
+}
+
 impl Context {
     pub fn client_id(&self) -> Option<i64> {
         self.client_id
@@ -66,43 +164,6 @@ impl Context {
 
     pub fn begin_transaction(&self) -> Context {
         unimplemented!()
-    }
-
-    /// Figure out a consensus on which joins should be used for which relations.
-    pub fn relation_table_count(
-        &self,
-        relation_paths: Vec<Vec<RelationId>>,
-    ) -> Result<RelationTableCount, DbrError> {
-        // We need to reduce relations -> table instances.
-        // For example we might have 2 relations to the same table
-        // or if we have multiple relations that converge to the same table
-        // then we need to differentiate.
-        let mut table_instances: HashMap<TableId, JoinedTableId> = HashMap::new();
-        let mut relation_hash: HashMap<Vec<RelationId>, (TableId, JoinedTableId)> = HashMap::new();
-
-        for path in relation_paths {
-            //let (relations, filter) = self.lookup_relation_path(base, path)?;
-
-            for index in 0..path.len() {
-                // Walk up the relation id chain.
-                let relation_chain = path[0..index].to_vec();
-                let last_relation = self.metadata.lookup_relation(path[index])?;
-                let last_table = last_relation.to_table_id;
-
-                if !relation_hash.contains_key(&relation_chain) {
-                    // we don't have this relation,
-                    // lets mark it down and give it a unique number so it can be referenced
-                    // in the `WHERE` clause and such.
-                    let table_instance_count = table_instances.entry(last_table).or_insert(JoinedTableId(0));
-                    table_instance_count.0 += 1;
-                    relation_hash.insert(relation_chain, (last_table, *table_instance_count));
-                }
-            }
-        }
-
-        Ok(RelationTableCount {
-            chains: relation_hash,
-        })
     }
 
     /// I'm taking the liberty of just calling a string of relations like
@@ -137,7 +198,7 @@ impl Context {
         Ok(chain)
     }
 
-    pub fn join(&self, relation: &Relation) -> Result<RelationJoin, DbrError> {
+    pub fn is_colocated(&self, relation: &Relation) -> Result<bool, DbrError> {
         let from_table = self.metadata.lookup_table(relation.from_table_id)?;
         let from_field = self.metadata.lookup_field(relation.from_field_id)?;
         let from_schema = self
@@ -153,19 +214,6 @@ impl Context {
         let base_instance = self.instance_by_handle(from_schema.name.to_owned())?;
         let related_instance = self.instance_by_handle(to_schema.name.to_owned())?;
 
-        if base_instance.info.colocated(&related_instance.info) {
-            Ok(RelationJoin::Colocated(format!(
-                "JOIN {}.{} ON ({}.{} = {}.{})",
-                related_instance.info.database_name(),
-                to_table.name,
-                to_table.name,
-                to_field.name,
-                from_table.name,
-                from_field.name,
-            )))
-        } else {
-            // we need to do a subquery now.
-            Ok(RelationJoin::Subquery("".to_owned()))
-        }
+        Ok(base_instance.info.colocated(&related_instance.info))
     }
 }

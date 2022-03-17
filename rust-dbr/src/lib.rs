@@ -5,6 +5,7 @@ pub mod instance;
 pub mod metadata;
 pub mod model;
 pub mod table;
+pub mod filter;
 
 pub mod prelude {
     pub use crate::cache::{DbrRecordCache, RecordMetadata};
