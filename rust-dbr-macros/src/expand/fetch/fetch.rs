@@ -78,23 +78,6 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
 
     if let Some(filter) = input.arguments.filter {
         println!("{:?}", filter.filter_group);
-        let expressions = filter.filter_group.expressions()?;
-        for expression in expressions {
-            let path_str = expression.relations_str();
-            let field_str = expression.field_str();
-
-            /*
-            filter_path.push(quote! {
-                RelationPath {
-                    path: vec![ #( #path_str ),* ],
-                    field: #field_str,
-                }
-            });
-            filter_op.push(expression.op.as_sql());
-            filter_value.push(expression.value.clone());
-            */
-        }
-
         // Song where album.artist.genre like "math%" and (album.artist.genre like "%rock%" or album.id = 4)
         // expands to
         //

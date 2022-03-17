@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 
-use sqlx::Type;
+use sqlx::{any::AnyArguments, encode::IsNull, Type};
 
 //use crate::{metadata::{TableId, FieldId}, RelationPath, Context};
-use crate::{prelude::*};
+use crate::prelude::*;
+
+type BindValue<'a> = AnyArguments<'a>;
 
 pub enum OrderDirection {
     Ascending,
@@ -12,28 +14,28 @@ pub enum OrderDirection {
 
 /// This is the construction of a select statement, this must be resolved before being able
 /// to be run as a SQL query.
-pub struct Select {
+pub struct Select<'a> {
     pub fields: Vec<FieldId>,
     pub primary_table: TableId,
     pub joined_tables: Vec<RelationId>,
-    pub filters: Option<FilterTree>,
+    pub filters: Option<FilterTree<'a>>,
     pub order: Vec<(FieldId, Option<OrderDirection>)>,
-    pub limit: Option<sqlx::any::AnyValue>,
+    pub limit: Option<BindValue<'a>>,
 }
 
 /// A resolved select statement.
-/// 
+///
 /// This should have enough information by itself to be able to generate a SQL statement and bind arguments.
-pub struct ResolvedSelect {
+pub struct ResolvedSelect<'a> {
     pub fields: Vec<Field>,
     pub primary_table: Table,
     pub joins: Vec<(Table, Field, Table, Field)>,
-    pub filters: Option<ResolvedFilterTree>,
+    pub filters: Option<ResolvedFilterTree<'a>>,
     pub order: Vec<(Field, Option<OrderDirection>)>,
-    pub limit: Option<sqlx::any::AnyValue>,
+    pub limit: Option<BindValue<'a>>,
 }
 
-impl Select {
+impl<'a> Select<'a> {
     pub fn new(primary_table: TableId) -> Self {
         Select {
             primary_table,
@@ -49,11 +51,17 @@ impl Select {
         self.fields.len() == 1
     }
 
-    pub fn resolve(self, context: &Context) -> Result<ResolvedSelect, DbrError> {
-        let Select {
-            fields, primary_table, joined_tables, filters, order, limit
+    pub fn resolve(self, context: &Context) -> Result<ResolvedSelect<'a>, DbrError> {
+        let Select::<'a> {
+            fields,
+            primary_table,
+            joined_tables,
+            filters,
+            order,
+            limit,
         } = self;
 
+        let mut table_registry = TableRegistry::new();
         let resolved_table = context.metadata.lookup_table(primary_table)?.clone();
 
         let mut resolved_fields = Vec::new();
@@ -62,37 +70,121 @@ impl Select {
             resolved_fields.push(field.clone());
         }
 
+        let resolved_filters = match filters {
+            Some(filters) => {
+                Some(filters.resolve(resolved_table.id, context, &mut table_registry)?)
+            }
+            None => None,
+        };
+
         Ok(ResolvedSelect {
             fields: resolved_fields,
             primary_table: resolved_table,
             joins: Vec::new(),
-            filters: None,
+            filters: resolved_filters,
             order: Vec::new(),
             limit: None,
         })
     }
 }
 
-pub enum FilterTree {
-    Or {
-        left: Box<FilterTree>,
-        right: Box<FilterTree>,
-    },
-    And {
-        children: Vec<FilterTree>,
-    },
-    Filter {
-        path: RelationPath,
-        value: sqlx::any::AnyValue,
-    },
+impl<'a> ResolvedSelect<'a> {
+    /*
+    pub async fn fetch_all<'c, T, E>(self, e: E) -> Result<Vec<T>, DbrError>
+        where
+            E: sqlx::AnyExecutor<'c>,
+            T: for<'r> sqlx::FromRow<'r, sqlx::any::AnyRow> + Send + Unpin
+    {
+        let sql = self.as_sql();
+        if let Some((sql, args)) = sql {
+            use sqlx::Arguments;
+
+            let result_set: Vec<T> = sqlx::query_as_with(&sql, args)
+                .fetch_all(e)
+                .await?;
+
+            return Ok(result_set);
+        }
+
+        Err(DbrError::Unimplemented(String::new()))
+    }
+    */
+
+    /// Return pure sql and arguments
+    ///
+    /// This will return `None` if there is an external subquery somewhere still.
+    /// Those have to be run before the "parent" statement.
+    pub fn as_sql(self) -> Option<(String, BindValue<'a>)> {
+        use sqlx::Arguments;
+        let mut arguments = BindValue::default();
+        let table = self.primary_table.name.clone();
+        let fields = self
+            .fields
+            .iter()
+            .map(|field| format!("{table}.{field}", table = table, field = field.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let joins = String::new();
+        let (filter_sql, filter_args) = match self.filters {
+            Some(filters) => match filters.as_sql() {
+                Some((filter_sql, filter_args)) => (filter_sql, filter_args),
+                None => return None,
+            },
+            None => (String::new(), BindValue::default()),
+        };
+
+        arguments.extend(filter_args);
+
+        let order = String::new();
+        let limit = String::new();
+        let database = "account_test";
+
+        Some((
+            format!(
+                "SELECT {fields} FROM {database}.{table} {joins} {where} {order} {limit}",
+                fields = fields,
+                database = database,
+                table = table,
+                joins = joins,
+                r#where = filter_sql,
+                order = order,
+                limit = limit,
+            ),
+            arguments,
+        ))
+    }
 }
 
-impl FilterTree {
+pub enum FilterTree<'a> {
+    Or {
+        left: Box<FilterTree<'a>>,
+        right: Box<FilterTree<'a>>,
+    },
+    And {
+        children: Vec<FilterTree<'a>>,
+    },
+    Filter(FilterExpr<'a>),
+}
+
+pub enum FilterOp {
+    Eq,
+    NotEq,
+    Like,
+    NotLike,
+}
+
+pub struct FilterExpr<'a> {
+    path: RelationPath,
+    op: FilterOp,
+    value: BindValue<'a>,
+}
+
+impl<'a> FilterTree<'a> {
     /// Remove unnecessary grouping so we don't have to do any unnecessary recursion in the future.
     ///
     /// Mainly since `A and (B and C)` is semantically the same as `A and B and C`, then we can ungroup `B and C`.
     /// But we cannot reduce `A and (B or C)` into `A and B or C`
-    pub fn reduce(self) -> Option<FilterTree> {
+    pub fn reduce(self) -> Option<FilterTree<'a>> {
         match self {
             or_tree @ Self::Or { .. } => Some(or_tree),
             Self::And { mut children } => match children.len() {
@@ -134,7 +226,7 @@ impl FilterTree {
         base_table_id: TableId,
         context: &Context,
         registry: &mut TableRegistry,
-    ) -> Result<ResolvedFilterTree, DbrError> {
+    ) -> Result<ResolvedFilterTree<'a>, DbrError> {
         match self {
             Self::Or { left, right } => Ok(ResolvedFilterTree::Or {
                 left: Box::new(left.resolve(base_table_id, context, registry)?),
@@ -148,23 +240,20 @@ impl FilterTree {
 
                 Ok(ResolvedFilterTree::And { children: resolved })
             }
-            Self::Filter { path, value } => {
+            Self::Filter(expr) => {
+                let mut current_chain = RelationChain::new(base_table_id);
+
                 let mut from_table = context.metadata.lookup_table(base_table_id)?;
                 let mut last_table_index = None;
 
-                let mut current_chain = RelationChain {
-                    base: base_table_id,
-                    chain: Vec::new(),
-                };
-
-                let mut relation_walk = path.relations.into_iter();
+                let mut relation_walk = expr.path.relations.into_iter();
                 while let Some(to_table_name) = relation_walk.next() {
                     let relation = context.metadata.find_relation(
                         SchemaIdentifier::Id(from_table.schema_id),
                         TableIdentifier::Id(from_table.id),
                         TableIdentifier::Name(to_table_name.to_owned()),
                     )?;
-                    
+
                     let to_table = context.metadata.lookup_table(relation.to_table_id)?;
 
                     if context.is_colocated(relation)? {
@@ -176,78 +265,118 @@ impl FilterTree {
                     } else {
                         // we gots to do a subquery weeee
                         let mut subquery = Select::new(to_table.id);
-                        let primary_key = to_table.primary_key().ok_or(DbrError::Unimplemented("missing primary key".to_owned()))?;
+                        let primary_key = to_table
+                            .primary_key()
+                            .ok_or(DbrError::Unimplemented("missing primary key".to_owned()))?;
                         subquery.fields.push(primary_key);
 
                         // Collect the rest of the relations and add it as a filter to the subquery, then resolve that.
-                        subquery.filters = Some(FilterTree::Filter {
+                        subquery.filters = Some(FilterTree::Filter(FilterExpr {
                             path: RelationPath {
                                 base: to_table.id,
                                 relations: relation_walk.collect(),
-                                field: path.field,
+                                field: expr.path.field,
                             },
-                            value: value,
-                        });
+                            op: expr.op,
+                            value: expr.value,
+                        }));
 
                         let resolved_subquery = subquery.resolve(context)?;
-                        return Ok(ResolvedFilterTree::Filter(ResolvedFilter::ExternalSubquery(Box::new(resolved_subquery))));
+                        return Ok(ResolvedFilterTree::Filter(
+                            ResolvedFilter::ExternalSubquery(Box::new(resolved_subquery)),
+                        ));
                     }
 
                     from_table = to_table;
                 }
 
-                let field_id = from_table.lookup_field(path.field)?;
+                let field_id = from_table.lookup_field(expr.path.field)?;
                 let field = context.metadata.lookup_field(*field_id)?;
 
-                let simple = ResolvedFilter::Simple {
+                let simple = ResolvedFilter::Predicate {
                     table: from_table.clone(),
                     table_index: last_table_index,
                     field: field.clone(),
-                    value: value,
+                    value: expr.value,
                 };
                 Ok(ResolvedFilterTree::Filter(simple))
             }
         }
     }
-
-    /*
-    pub fn as_sql(&self) -> String {
-        match self {
-            Self::Or { left, right } => {
-                format!("({left} OR {right})", left = left.as_sql(), right = right.as_sql())
-            }
-            Self::And { children } => {
-                let children_sql = children.iter().map(|child| child.as_sql()).collect::<Vec<_>>();
-                children_sql.join(" AND ")
-            }
-            Self::Filter {
-                path,
-                value,
-            } => {
-                format!("{path} = ?", path = path.field)
-            }
-        }
-    }
-    */
 }
 
-pub enum ResolvedFilter {
-    ExternalSubquery(Box<ResolvedSelect>),
-    Simple {
+pub enum ResolvedFilter<'a> {
+    ExternalSubquery(Box<ResolvedSelect<'a>>),
+    Predicate {
         table: Table,
         table_index: Option<JoinedTableIndex>,
         field: Field,
-        value: sqlx::any::AnyValue,
+        value: BindValue<'a>,
     },
 }
 
-pub enum ResolvedFilterTree {
+pub enum ResolvedFilterTree<'a> {
     Or {
-        left: Box<ResolvedFilterTree>,
-        right: Box<ResolvedFilterTree>,
+        left: Box<ResolvedFilterTree<'a>>,
+        right: Box<ResolvedFilterTree<'a>>,
     },
     And {
-        children: Vec<ResolvedFilterTree>,
+        children: Vec<ResolvedFilterTree<'a>>,
     },
-    Filter(ResolvedFilter),
+    Filter(ResolvedFilter<'a>),
+}
+
+impl<'a> ResolvedFilterTree<'a> {
+    pub fn as_sql(self) -> Option<(String, BindValue<'a>)> {
+        use sqlx::Arguments;
+        match self {
+            Self::Or { left, right } => match (left.as_sql(), right.as_sql()) {
+                (Some((left_sql, left_args)), Some((right_sql, right_args))) => {
+                    let sql = format!("({left} OR {right})", left = left_sql, right = right_sql);
+                    let mut args = left_args;
+                    args.extend(right_args);
+                    Some((sql, args))
+                }
+                _ => None,
+            },
+            Self::And { children } => {
+                let mut sql = Vec::new();
+                let mut args = BindValue::default();
+                for child in children {
+                    match child.as_sql() {
+                        Some((child_sql, child_args)) => {
+                            sql.push(child_sql);
+                            args.extend(child_args);
+                        }
+                        _ => return None,
+                    }
+                }
+
+                Some((sql.join(" AND "), args))
+            }
+            Self::Filter(filter) => match filter {
+                ResolvedFilter::ExternalSubquery(..) => None,
+                ResolvedFilter::Predicate {
+                    table,
+                    table_index,
+                    field,
+                    value,
+                } => {
+                    let table_alias = match table_index {
+                        Some(index) => {
+                            format!("{table}{index}", table = table.name, index = *index)
+                        }
+                        _ => table.name.clone(),
+                    };
+
+                    let sql = format!(
+                        "{table}.{field} = ?",
+                        table = table_alias,
+                        field = field.name
+                    );
+                    Some((sql, value))
+                }
+            },
+        }
+    }
 }

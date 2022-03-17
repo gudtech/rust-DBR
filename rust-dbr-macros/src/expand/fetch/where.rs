@@ -2,7 +2,6 @@ use std::collections::{HashMap, HashSet};
 
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use rust_dbr::filter::FilterTree;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
@@ -16,7 +15,7 @@ pub use super::prelude::*;
 #[derive(Debug, Clone)]
 pub struct WhereArgs {
     pub keyword: Token![where],
-    pub filter_group: FilterGroup,
+    pub filter_group: FilterTree,
 }
 
 impl Parse for WhereArgs {
@@ -37,82 +36,94 @@ impl WhereArgs {
 }
 
 #[derive(Debug, Clone)]
-pub enum FilterGroupOp {
-    And(keyword::and),
-    Or(keyword::or),
-}
-
-impl Parse for FilterGroupOp {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let lookahead = input.lookahead1();
-        if lookahead.peek(keyword::and) {
-            Ok(FilterGroupOp::And(input.parse()?))
-        } else if lookahead.peek(keyword::or) {
-            Ok(FilterGroupOp::Or(input.parse()?))
-        } else {
-            Err(lookahead.error())
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum FilterGroup {
-    Group {
+pub enum FilterTree {
+    Or {
         paren: Option<token::Paren>,
-        groups: Punctuated<FilterGroup, FilterGroupOp>,
+        left: Box<FilterTree>,
+        right: Box<FilterTree>,
     },
-    Expr(FilterExpr),
+    And {
+        paren: Option<token::Paren>,
+        and: Punctuated<FilterTree, keyword::and>,
+    },
+    Expr {
+        paren: Option<token::Paren>,
+        expr: FilterExpr,
+    },
 }
 
-impl Parse for FilterGroup {
+impl Parse for FilterTree {
     fn parse(input: ParseStream) -> Result<Self> {
         let lookahead = input.lookahead1();
         if lookahead.peek(token::Paren) {
+            dbg!("paren");
             let inner_group;
             let group_paren = syn::parenthesized!(inner_group in input);
-            let mut group = FilterGroup::parse(&inner_group)?;
-            if let FilterGroup::Group { ref mut paren, .. } = group {
-                *paren = Some(group_paren);
-            }
-            Ok(group)
-        } else {
-            let initial_expr = FilterExpr::parse(&input)?;
-            if FilterGroupOp::parse(&input.fork()).is_ok() {
-                let mut groups = Punctuated::new();
-                groups.push_value(FilterGroup::Expr(initial_expr));
-
-                loop {
-                    if !FilterGroupOp::parse(&input.fork()).is_ok() {
-                        break;
-                    }
-                    let punct = input.parse()?;
-                    groups.push_punct(punct);
-                    let value = FilterGroup::parse(input)?;
-                    groups.push_value(value);
+            let mut group = FilterTree::parse(&inner_group)?;
+            let mut unnecessary = false;
+            match group {
+                Self::Or { ref mut paren, .. } => {
+                    *paren = Some(group_paren);
                 }
-
-                Ok(FilterGroup::Group {
-                    paren: None,
-                    groups,
-                })
-            } else {
-                Ok(FilterGroup::Expr(initial_expr))
+                Self::And { ref mut paren, .. } => {
+                    *paren = Some(group_paren);
+                    unnecessary = true;
+                }
+                Self::Expr { ref mut paren, .. } => {
+                    *paren = Some(group_paren);
+                    unnecessary = true;
+                }
             }
+
+            if unnecessary {
+                group_paren
+                    .span
+                    .unwrap()
+                    .warning("unnecessary parens")
+                    .emit();
+            }
+
+            return Ok(group);
         }
-    }
-}
 
-impl FilterGroup {
-    pub fn expressions(&self) -> Result<Vec<&FilterExpr>> {
-        match self {
-            FilterGroup::Group { paren, groups } => {
-                let mut expressions = Vec::new();
-                for group in groups {
-                    expressions.extend(group.expressions()?);
+        let expr = FilterTree::Expr {
+            paren: None,
+            expr: input.parse()?,
+        };
+
+        let lookahead = input.lookahead1();
+        if lookahead.peek(keyword::and) {
+            dbg!("and");
+            let mut punctuated = Punctuated::default();
+            punctuated.push_value(expr);
+
+            let and: keyword::and = input.parse()?;
+            punctuated.push_punct(and);
+
+            loop {
+                punctuated.push_value(input.parse()?);
+                let lookahead = input.lookahead1();
+                if !lookahead.peek(keyword::and) {
+                    break;
                 }
-                Ok(expressions)
+
+                punctuated.push_punct(input.parse()?);
             }
-            FilterGroup::Expr(expr) => Ok(vec![expr]),
+
+            Ok(FilterTree::And {
+                paren: None,
+                and: punctuated,
+            })
+        } else if lookahead.peek(keyword::or) {
+            dbg!("or");
+            Ok(FilterTree::Or {
+                paren: None,
+                left: Box::new(expr),
+                right: Box::new(input.parse()?),
+            })
+        } else {
+            dbg!("expr");
+            Ok(expr)
         }
     }
 }
@@ -141,33 +152,10 @@ impl Parse for FilterPath {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum FilterValue {
-    Path(FilterPath),
-    Lit(Lit),
-}
-#[derive(Debug, Clone)]
-pub struct FilterExpr {
-    path: FilterPath,
-    op: FilterOp,
-    //value: FilterValue,
-    value: Expr,
-}
-
-impl Parse for FilterExpr {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let path = input.parse::<FilterPath>()?;
-        let op = input.parse::<FilterOp>()?;
-        let value = input.parse::<Expr>()?;
-
-        Ok(FilterExpr { path, op, value })
-    }
-}
-
-impl FilterExpr {
+impl FilterPath {
     /// Every portion of the path aside from the field.
     pub fn relations(&self) -> Vec<&FilterPathSegment> {
-        let segments = self.path.segments.iter().collect::<Vec<_>>();
+        let segments = self.segments.iter().collect::<Vec<_>>();
         if let Some((field, relations)) = segments.as_slice().split_last() {
             relations.to_vec()
         } else {
@@ -183,11 +171,55 @@ impl FilterExpr {
     }
 
     pub fn field(&self) -> &FilterPathSegment {
-        self.path.segments.iter().last().expect("")
+        self.segments.iter().last().expect("")
     }
 
     pub fn field_str(&self) -> String {
         self.field().ident.to_string()
+    }
+
+    pub fn as_relation_path_tokens(&self, base_table_expr: Expr) -> TokenStream {
+        let relations_str = self.relations_str();
+        let field_str = self.field_str();
+        quote! {
+            RelationPath {
+                base_table: #base_table_expr,
+                path: vec![ #( #relations_str ),* ],
+                field: #field_str,
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FilterExpr {
+    path: FilterPath,
+    op: FilterOp,
+    value: Expr,
+}
+
+impl Parse for FilterExpr {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let path = input.parse::<FilterPath>()?;
+        let op = input.parse::<FilterOp>()?;
+        let value = input.parse::<Expr>()?;
+
+        Ok(FilterExpr { path, op, value })
+    }
+}
+
+impl FilterExpr {
+    pub fn as_filter_tokens(&self, base_table_expr: Expr) -> TokenStream {
+        let op_tokens = self.op.as_tokens();
+        let path_tokens = self.path.as_relation_path_tokens(base_table_expr);
+        let value_tokens = &self.value;
+        quote! {
+            FilterExpr {
+                path: #path_tokens,
+                op: #op_tokens,
+                value: { use ::sqlx::Arguments; let mut args = ::sqlx::any::AnyArguments::default() args.add(#value_tokens); args },
+            }
+        }
     }
 }
 
@@ -200,14 +232,13 @@ pub enum FilterOp {
 }
 
 impl FilterOp {
-    fn as_sql(&self) -> String {
+    pub fn as_tokens(&self) -> TokenStream {
         match self {
-            Self::Eq(_) => "=",
-            Self::NotEq(_) => "!=",
-            Self::Like(_) => "LIKE",
-            Self::NotLike(_, _) => "NOT LIKE",
+            Self::Eq(_) => quote! { ::rust_dbr::FilterOp::Eq },
+            Self::NotEq(_) => quote! { ::rust_dbr::FilterOp::NotEq },
+            Self::Like(_) => quote! { ::rust_dbr::FilterOp::Like },
+            Self::NotLike(_, _) => quote! { ::rust_dbr::FilterOp::NotLike },
         }
-        .to_owned()
     }
 }
 

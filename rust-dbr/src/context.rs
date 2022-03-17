@@ -28,8 +28,8 @@ pub struct FilterPath {
 }
 
 /// Incrementing count of which joined table instance to use.
-#[derive(Debug, Copy, Clone)]
-pub struct JoinedTableIndex(u32);
+#[derive(Deref, Debug, Copy, Clone)]
+pub struct JoinedTableIndex(#[deref] u32);
 
 #[derive(Debug, Clone)]
 pub enum RelationJoin {
@@ -69,8 +69,7 @@ impl TableRegistry {
                     .entry(chain.base)
                     .or_insert(JoinedTableIndex(0));
                 instance_count.0 += 1;
-                self.relation_hash
-                    .insert(chain.clone(), *instance_count);
+                self.relation_hash.insert(chain.clone(), *instance_count);
                 *instance_count
             }
         }
@@ -113,10 +112,7 @@ impl Context {
 }
 
 impl RelationPath {
-    pub fn into_chain(
-        self,
-        context: &Context,
-    ) -> Result<RelationChain, DbrError> {
+    pub fn into_chain(mut self, context: &Context) -> Result<RelationChain, DbrError> {
         let base_table = context.metadata.lookup_table(self.base)?;
         let mut chain = RelationChain {
             base: base_table.id,

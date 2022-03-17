@@ -1,3 +1,5 @@
+#![feature(proc_macro_diagnostic)]
+
 use syn::{parse_macro_input, DeriveInput};
 
 mod expand;

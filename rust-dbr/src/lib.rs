@@ -9,7 +9,9 @@ pub mod table;
 
 pub mod prelude {
     pub use crate::cache::{DbrRecordCache, RecordMetadata};
-    pub use crate::context::{Context, RelationPath, RelationChain, TableRegistry, JoinedTableIndex};
+    pub use crate::context::{
+        Context, JoinedTableIndex, RelationChain, RelationPath, TableRegistry,
+    };
     pub use crate::error::DbrError;
     pub use crate::instance::{DbrInstance, DbrInstanceId, DbrInstanceInfo, DbrInstances, Pool};
     pub use crate::metadata::{
@@ -21,6 +23,7 @@ pub mod prelude {
 }
 
 pub use prelude::{
-    Active, ActiveModel, Context, DbrError, DbrTable, Metadata, PartialModel, Pool, RelationId,
-    RelationPath, TableRegistry, SchemaIdentifier, TableIdentifier, RelationChain, JoinedTableIndex,
+    Active, ActiveModel, Context, DbrError, DbrTable, JoinedTableIndex, Metadata, PartialModel,
+    Pool, RelationChain, RelationId, RelationPath, SchemaIdentifier, TableIdentifier,
+    TableRegistry,
 };

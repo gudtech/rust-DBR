@@ -13,7 +13,7 @@ syn = { version = "1.0.52", features = ["full", "extra-traits", "derive"] }
 quote = "1.0.7"
 proc-macro2 = "1.0"
 
-sqlx = { version = "0.5.11", features = ["mysql", "sqlite", "runtime-tokio-rustls"] }
+sqlx = { path = "../../sqlx", version = "0.5.11", features = ["any", "mysql", "sqlite", "runtime-tokio-rustls"] }
 lazy_static = "1.4"
 async-trait = "0.1.52"
 futures = "0.3"

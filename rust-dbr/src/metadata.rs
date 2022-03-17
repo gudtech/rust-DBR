@@ -414,7 +414,6 @@ impl TableInfo {
             .await
             .map_err(|err| DbrError::from(err))
     }
-
 }
 
 impl Table {
