@@ -188,49 +188,26 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
 
                 let partial_clone = partial.clone();
                 let instance = context.instance_by_handle(#ident::schema().to_owned())?;
+                let mut fields = Vec::new();
+                let mut query_str = String::new();
+                let mut arguments = ::sqlx::any::AnyArguments::default();
 
-                match &instance.pool {
-                    ::rust_dbr::Pool::MySql(pool) => {
-                        let mut fields = Vec::new();
-                        let mut arguments = ::sqlx::mysql::MySqlArguments::default();
-
-                        #(
-                            if let Some(field) = partial.#settable_field_name {
-                                fields.push(format!("{} = ?", stringify!(#settable_field_name)));
-                                arguments.add(field);
-                            }
-                        )*
-
-                        if fields.len() == 0 {
-                            return Ok(())
-                        }
-
-                        arguments.add(self.id());
-                        let query_str = format!("UPDATE {} SET {} WHERE id = ?", #ident::table_name(), fields.join(" "));
-                        let query = ::sqlx::query_with(&query_str, arguments);
-                        query.execute(pool).await?;
+                #(
+                    if let Some(field) = partial.#settable_field_name {
+                        fields.push(format!("{} = ?", stringify!(#settable_field_name)));
+                        arguments.add(field);
                     }
-                    ::rust_dbr::Pool::Sqlite(pool) => {
-                        let mut fields = Vec::new();
-                        let mut arguments = ::sqlx::sqlite::SqliteArguments::default();
+                )*
 
-                        #(
-                            if let Some(field) = partial.#settable_field_name {
-                                fields.push(format!("{} = ?", stringify!(#settable_field_name)));
-                                arguments.add(field);
-                            }
-                        )*
-
-                        if fields.len() == 0 {
-                            return Ok(())
-                        }
-
-                        arguments.add(self.id());
-                        let query_str = format!("UPDATE {} SET {} WHERE id = ?", #ident::table_name(), fields.join(" "));
-                        let query = ::sqlx::query_with(&query_str, arguments);
-                        query.execute(pool).await?;
-                    }
+                if fields.len() == 0 {
+                    return Ok(())
                 }
+
+                arguments.add(self.id());
+                query_str = format!("UPDATE {} SET {} WHERE id = ?", #ident::table_name(), fields.join(" "));
+
+                let query = ::sqlx::query_with(&query_str, arguments);
+                query.execute(&instance.pool).await?;
 
                 self.apply_partial(partial_clone)?;
 

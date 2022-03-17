@@ -251,33 +251,16 @@ impl DbrInstances {
 }
 
 #[derive(Debug)]
-pub enum Pool {
-    MySql(sqlx::Pool<sqlx::MySql>),
-    Sqlite(sqlx::Pool<sqlx::Sqlite>),
-}
-
-#[derive(Debug)]
 pub struct DbrInstance {
     pub info: DbrInstanceInfo,
     pub cache: DbrRecordCache,
-    pub pool: Pool,
+    pub pool: sqlx::AnyPool,
 }
 
 impl DbrInstance {
     pub async fn new(info: DbrInstanceInfo) -> Result<Self, DbrError> {
         let uri = info.connection_uri();
-        dbg!(&uri);
-        let pool = match info.module().as_str() {
-            "mysql" => {
-                let pool = sqlx::Pool::<sqlx::MySql>::connect(&uri).await?;
-                Pool::MySql(pool)
-            }
-            "sqlite" => {
-                let pool = sqlx::Pool::<sqlx::Sqlite>::connect(&uri).await?;
-                Pool::Sqlite(pool)
-            }
-            _ => return Err(DbrError::PoolDisconnected),
-        };
+        let pool = sqlx::AnyPool::connect(&uri).await?;
 
         Ok(Self {
             info: info,

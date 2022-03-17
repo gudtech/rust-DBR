@@ -13,18 +13,18 @@ pub mod prelude {
         Context, JoinedTableIndex, RelationChain, RelationPath, TableRegistry,
     };
     pub use crate::error::DbrError;
-    pub use crate::instance::{DbrInstance, DbrInstanceId, DbrInstanceInfo, DbrInstances, Pool};
+    pub use crate::filter::{FilterOp, FilterPredicate, FilterTree, OrderDirection, Select};
+    pub use crate::instance::{DbrInstance, DbrInstanceId, DbrInstanceInfo, DbrInstances};
     pub use crate::metadata::{
         Field, FieldId, FieldIdentifier, Metadata, Relation, RelationId, Schema, SchemaId,
         SchemaIdentifier, Table, TableId, TableIdentifier,
     };
     pub use crate::model::{Active, ActiveModel, PartialModel};
     pub use crate::table::DbrTable;
-    pub use crate::filter::{FilterTree, FilterPredicate, FilterOp, OrderDirection};
 }
 
 pub use prelude::{
-    Active, ActiveModel, Context, DbrError, DbrTable, JoinedTableIndex, Metadata, PartialModel,
-    Pool, RelationChain, RelationId, RelationPath, SchemaIdentifier, TableIdentifier,
-    TableRegistry, FilterTree, FilterPredicate, FilterOp, OrderDirection,
+    Active, ActiveModel, Context, DbrError, DbrTable, FilterOp, FilterPredicate, FilterTree,
+    JoinedTableIndex, Metadata, OrderDirection, PartialModel, RelationChain, RelationId,
+    RelationPath, SchemaIdentifier, Select, TableIdentifier, TableRegistry,
 };

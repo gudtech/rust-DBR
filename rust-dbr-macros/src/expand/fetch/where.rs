@@ -129,10 +129,7 @@ impl Parse for FilterTree {
 impl FilterTree {
     pub fn as_filter_tree_tokens(&self, base_table_expr: &TokenStream) -> TokenStream {
         match self {
-            Self::And {
-                and,
-                ..
-            } => {
+            Self::And { and, .. } => {
                 let mut and_tokens = Vec::new();
                 for tree in and {
                     and_tokens.push(tree.as_filter_tree_tokens(base_table_expr));
@@ -142,21 +139,14 @@ impl FilterTree {
                     ::rust_dbr::FilterTree::And { children: vec![#(#and_tokens),*], }
                 }
             }
-            Self::Or {
-                left,
-                right,
-                ..
-            } => {
+            Self::Or { left, right, .. } => {
                 let left = left.as_filter_tree_tokens(base_table_expr);
                 let right = right.as_filter_tree_tokens(base_table_expr);
                 quote! {
                     ::rust_dbr::FilterTree::Or { left: Box::new(#left), right: Box::new(#right) }
                 }
             }
-            Self::Predicate {
-                predicate,
-                ..
-            } => {
+            Self::Predicate { predicate, .. } => {
                 let filter_predicate = predicate.as_filter_tokens(base_table_expr);
                 quote! {
                     ::rust_dbr::FilterTree::Predicate(#filter_predicate)

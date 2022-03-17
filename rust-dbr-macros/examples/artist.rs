@@ -75,21 +75,152 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: metadata,
     };
 
-    let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre like "math%".to_string() and (album.artist.genre like "%rock%".to_string() or album.id = 4i64))?;
-    //let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre like "math%".to_string())?;
+    let mut songs: Vec<Active<Song>> = fetch!(
+        &context,
+        Song where
+            name = "The Detail"
+            and album.artist.genre like "math%"
+            and (album.artist.genre like "%rock%" or album.id = 4i64)
+        order by id
+        limit 10
+    )?;
+
     /*
-    for song in &mut songs {
-        let id = song.id();
-        let name = song.name()?;
-        let album_id = song.album_id()?;
-        dbg!(&id, &name, &album_id);
-        song.set_name(&context, song.name()?).await?;
-        song.set_album_id(&context, song.album_id()?).await?;
-        dbg!(&song.likes()?);
-        song.set_likes(&context, song.likes()? + 1).await?;
-        dbg!(&song.likes()?);
-    }
- */
+    let mut songs: Vec<Active<Song>> = {
+        async fn __fetch_internal(
+            context: &::rust_dbr::Context,
+        ) -> Result<Vec<::rust_dbr::Active<Song>>, ::rust_dbr::DbrError> {
+            use ::sqlx::Arguments;
+            let instance = context.instance_by_handle(Song::schema().to_owned())?;
+            let schema = context
+                .metadata
+                .lookup_schema(::rust_dbr::SchemaIdentifier::Name(
+                    Song::schema().to_owned(),
+                ))?;
+            let base_table_id = schema.lookup_table_by_name(Song::table_name().to_owned())?;
+            let base_table = context.metadata.lookup_table(*base_table_id)?;
+            let mut select = ::rust_dbr::Select::new(*base_table_id);
+            select.filters = Some(::rust_dbr::FilterTree::And {
+                children: <[_]>::into_vec(Box::new([
+                    ::rust_dbr::FilterTree::Predicate(::rust_dbr::FilterPredicate {
+                        path: ::rust_dbr::RelationPath {
+                            base: *base_table_id,
+                            relations: ::std::vec::Vec::new().into(),
+                            field: "name".to_owned(),
+                        },
+                        op: ::rust_dbr::FilterOp::Eq,
+                        value: {
+                            use ::sqlx::Arguments;
+                            let mut args = ::sqlx::any::AnyArguments::default();
+                            args.add("The Detail");
+                            args
+                        },
+                    }),
+                    ::rust_dbr::FilterTree::And {
+                        children: <[_]>::into_vec(Box::new([
+                            ::rust_dbr::FilterTree::Predicate(::rust_dbr::FilterPredicate {
+                                path: ::rust_dbr::RelationPath {
+                                    base: *base_table_id,
+                                    relations: <[_]>::into_vec(Box::new([
+                                        "album".to_owned(),
+                                        "artist".to_owned(),
+                                    ]))
+                                    .into(),
+                                    field: "genre".to_owned(),
+                                },
+                                op: ::rust_dbr::FilterOp::Like,
+                                value: {
+                                    use ::sqlx::Arguments;
+                                    let mut args = ::sqlx::any::AnyArguments::default();
+                                    args.add("math%");
+                                    args
+                                },
+                            }),
+                            ::rust_dbr::FilterTree::Or {
+                                left: Box::new(::rust_dbr::FilterTree::Predicate(
+                                    ::rust_dbr::FilterPredicate {
+                                        path: ::rust_dbr::RelationPath {
+                                            base: *base_table_id,
+                                            relations: <[_]>::into_vec(Box::new([
+                                                "album".to_owned(),
+                                                "artist".to_owned(),
+                                            ]))
+                                            .into(),
+                                            field: "genre".to_owned(),
+                                        },
+                                        op: ::rust_dbr::FilterOp::Like,
+                                        value: {
+                                            use ::sqlx::Arguments;
+                                            let mut args = ::sqlx::any::AnyArguments::default();
+                                            args.add("%rock%");
+                                            args
+                                        },
+                                    },
+                                )),
+                                right: Box::new(::rust_dbr::FilterTree::Predicate(
+                                    ::rust_dbr::FilterPredicate {
+                                        path: ::rust_dbr::RelationPath {
+                                            base: *base_table_id,
+                                            relations: <[_]>::into_vec(
+                                                Box::new(["album".to_owned()]),
+                                            )
+                                            .into(),
+                                            field: "id".to_owned(),
+                                        },
+                                        op: ::rust_dbr::FilterOp::Eq,
+                                        value: {
+                                            use ::sqlx::Arguments;
+                                            let mut args = ::sqlx::any::AnyArguments::default();
+                                            args.add(4i64);
+                                            args
+                                        },
+                                    },
+                                )),
+                            },
+                        ])),
+                    },
+                ])),
+            });
+            select.fields = base_table.fields.values().cloned().collect();
+            let resolved_select = select.resolve(context)?;
+            let (sql, args) = match resolved_select.as_sql() {
+                Some((sql, args)) => {
+                    (sql, args)
+                }
+                _ => (String::new(), sqlx::any::AnyArguments::default()),
+            };
+
+            dbg!(&sql);
+            let result_set: Vec<Song> = sqlx::query_as_with(&sql, args)
+                .fetch_all(&instance.pool)
+                .await?
+                .clone();
+            let mut active_records: Vec<Active<Song>> = Vec::new();
+            for record in result_set {
+                let id = record.id;
+                let record_ref = instance.cache.set_record(id, record)?;
+                active_records.push(Active::<Song>::from_arc(id, record_ref));
+            }
+            Ok(active_records)
+        }
+        __fetch_internal(&context).await
+    }?;
+    */
+
+    /*
+       //let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre like "math%".to_string())?;
+       for song in &mut songs {
+           let id = song.id();
+           let name = song.name()?;
+           let album_id = song.album_id()?;
+           dbg!(&id, &name, &album_id);
+           song.set_name(&context, song.name()?).await?;
+           song.set_album_id(&context, song.album_id()?).await?;
+           dbg!(&song.likes()?);
+           song.set_likes(&context, song.likes()? + 1).await?;
+           dbg!(&song.likes()?);
+       }
+    */
 
     Ok(())
 }

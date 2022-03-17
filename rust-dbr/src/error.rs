@@ -17,6 +17,7 @@ pub enum DbrError {
         tag: Option<String>,
     },
     MetadataError(crate::metadata::MetadataError),
+    UnfinishedExternalSubquery,
 }
 
 impl std::fmt::Display for DbrError {
@@ -54,6 +55,10 @@ impl std::fmt::Display for DbrError {
                 write!(f, "missing instance ({}, {})", ident, extra)
             }
             Self::MetadataError(err) => write!(f, "metadata error: {}", err),
+            Self::UnfinishedExternalSubquery => write!(
+                f,
+                "contains unfinished external subquery, this must be run before the parent"
+            ),
         }
     }
 }
