@@ -75,8 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: metadata,
     };
 
-    let mut songs: Vec<Active<Song>> =
-        fetch!(&context, Song where album.artist.genre like "math%" and (album.artist.genre like "%rock%" or album.id = 4))?;
+    let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre like "math%" and (album.artist.genre like "%rock%" or album.id = 4))?;
     for song in &mut songs {
         let id = song.id();
         let name = song.name()?;

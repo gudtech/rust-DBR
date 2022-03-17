@@ -1,11 +1,11 @@
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    Expr, Ident, Lit, Result, Token, token, Type,
+    token, Expr, Ident, Lit, Result, Token, Type,
 };
 
 pub use super::prelude::*;
@@ -71,222 +71,10 @@ impl Parse for FetchArguments {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FilterPathSegment {
-    pub ident: Ident,
-}
-
-impl Parse for FilterPathSegment {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let ident = input.parse::<Ident>()?;
-        Ok(FilterPathSegment { ident })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct FilterPath {
-    pub segments: Punctuated<FilterPathSegment, Token![.]>,
-}
-
-impl Parse for FilterPath {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let segments = Punctuated::<FilterPathSegment, Token![.]>::parse_separated_nonempty(input)?;
-        Ok(FilterPath { segments })
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum FilterValue {
-    Path(FilterPath),
-    Lit(Lit),
-}
-
-impl Parse for FilterValue {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let lookahead = input.lookahead1();
-        if lookahead.peek(Ident) {
-            let path = input.parse::<FilterPath>()?;
-            Ok(FilterValue::Path(path))
-        } else if lookahead.peek(Lit) {
-            let lit = input.parse::<Lit>()?;
-            Ok(FilterValue::Lit(lit))
-        } else {
-            Err(lookahead.error())
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum FilterOp {
-    Eq(Token![=]),
-    NotEq(Token![!=]),
-    Like(keyword::like),
-    NotLike(keyword::not, keyword::like),
-}
-
-impl FilterOp {
-    fn as_sql(&self) -> String {
-        match self {
-            Self::Eq(_) => "=",
-            Self::NotEq(_) => "!=",
-            Self::Like(_) => "LIKE",
-            Self::NotLike(_, _) => "NOT LIKE",
-        }.to_owned()
-    }
-}
-
-impl Parse for FilterOp {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let lookahead = input.lookahead1();
-        if lookahead.peek(Token![=]) {
-            let eq = input.parse::<Token![=]>()?;
-            Ok(FilterOp::Eq(eq))
-        } else if lookahead.peek(Token![!=]) {
-            let neq = input.parse::<Token![!=]>()?;
-            Ok(FilterOp::NotEq(neq))
-        } else if lookahead.peek(keyword::like) {
-            let like = input.parse::<keyword::like>()?;
-            Ok(FilterOp::Like(like))
-        } else if lookahead.peek(keyword::not) {
-            let not = input.parse::<keyword::not>()?;
-            let like = input.parse::<keyword::like>()?;
-            Ok(FilterOp::NotLike(not, like))
-        } else {
-            Err(lookahead.error())
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum FilterGroupOp {
-    And(keyword::and),
-    Or(keyword::or),
-}
-
-impl Parse for FilterGroupOp {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let lookahead = input.lookahead1();
-        if lookahead.peek(keyword::and) {
-            Ok(FilterGroupOp::And(input.parse()?))
-        } else if lookahead.peek(keyword::or) {
-            Ok(FilterGroupOp::Or(input.parse()?))
-        } else {
-            Err(lookahead.error())
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum FilterGroup {
-    Group {
-        paren: Option<token::Paren>,
-        groups: Punctuated<FilterGroup, FilterGroupOp>,
-    },
-    Expr(FilterExpr),
-}
-
-impl Parse for FilterGroup {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let lookahead = input.lookahead1();
-        if lookahead.peek(token::Paren) {
-            let inner_group ;
-            let group_paren = syn::parenthesized!(inner_group in input);
-            let mut group = FilterGroup::parse(&inner_group)?;
-            if let FilterGroup::Group { ref mut paren, .. } = group {
-                *paren = Some(group_paren);
-            }
-            Ok(group)
-        } else {
-            let initial_expr = FilterExpr::parse(&input)?;
-            if FilterGroupOp::parse(&input.fork()).is_ok() {
-                let mut groups = Punctuated::new();
-                groups.push_value(FilterGroup::Expr(initial_expr));
-                
-                loop {
-                    if !FilterGroupOp::parse(&input.fork()).is_ok() {
-                        break;
-                    }
-                    let punct = input.parse()?;
-                    groups.push_punct(punct);
-                    let value = FilterGroup::parse(input)?;
-                    groups.push_value(value);
-                }
-
-                Ok(FilterGroup::Group { paren: None, groups })
-            } else {
-                Ok(FilterGroup::Expr(initial_expr))
-            }
-        }
-    }
-}
-
-impl FilterGroup {
-    pub fn expressions(&self) -> Result<Vec<&FilterExpr>> {
-        match self {
-            FilterGroup::Group {
-                paren, groups,
-            } => {
-                let mut expressions = Vec::new();
-                for group in groups {
-                    expressions.extend(group.expressions()?);
-                }
-                Ok(expressions)
-            }
-            FilterGroup::Expr(expr) => {
-                Ok(vec![expr])
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct FilterExpr {
-    path: FilterPath,
-    op: FilterOp,
-    //value: FilterValue,
-    value: Expr,
-}
-
-impl Parse for FilterExpr {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let path = input.parse::<FilterPath>()?;
-        let op = input.parse::<FilterOp>()?;
-        let value = input.parse::<Expr>()?;
-
-        Ok(FilterExpr { path, op, value })
-    }
-}
-
-impl FilterExpr {
-    /// Every portion of the path aside from the field.
-    pub fn relations(&self) -> Vec<&FilterPathSegment> {
-        let segments = self.path.segments.iter().collect::<Vec<_>>();
-        if let Some((field, relations)) = segments.as_slice().split_last() {
-            relations.to_vec()
-        } else {
-            Vec::new()
-        }
-    }
-
-    pub fn relations_str(&self) -> Vec<String> {
-        self.relations().iter().map(|relation| relation.ident.to_string()).collect()
-    }
-
-    pub fn field(&self) -> &FilterPathSegment {
-        self.path.segments.iter().last().expect("")
-    }
-
-    pub fn field_str(&self) -> String {
-        self.field().ident.to_string()
-    }
-}
-
 pub fn fetch(input: FetchInput) -> Result<TokenStream> {
     let table = input.arguments.table;
     let context = input.context;
-    let mut filter_path = Vec::new();
-    let mut filter_op = Vec::new();
-    let mut filter_value = Vec::new();
+    //let mut filter_path = Vec::new();
 
     if let Some(filter) = input.arguments.filter {
         println!("{:?}", filter.filter_group);
@@ -295,6 +83,7 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
             let path_str = expression.relations_str();
             let field_str = expression.field_str();
 
+            /*
             filter_path.push(quote! {
                 RelationPath {
                     path: vec![ #( #path_str ),* ],
@@ -303,6 +92,7 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
             });
             filter_op.push(expression.op.as_sql());
             filter_value.push(expression.value.clone());
+            */
         }
 
         // Song where album.artist.genre like "math%" and (album.artist.genre like "%rock%" or album.id = 4)
@@ -338,9 +128,12 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
 
     let (limit_str, limit_argument) = if let Some(limit) = input.arguments.limit {
         let limit_expr = limit.limit_expr;
-        ("LIMIT ?".to_owned(), Some(quote! {
-            arguments.add(#limit_expr);
-        }))
+        (
+            "LIMIT ?".to_owned(),
+            Some(quote! {
+                arguments.add(#limit_expr);
+            }),
+        )
     } else {
         ("".to_owned(), None)
     };
@@ -362,32 +155,6 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
                 let mut arguments = ::sqlx::mysql::MySqlArguments::default();
                 let mut relation_chains: Vec<Vec<::rust_dbr::RelationId>> = Vec::new();
                 let mut paths: Vec<::rust_dbr::RelationPath> = Vec::new();
-
-                async fn __fetch_recurse(where_tree: WhereTree, context: &::rust_dbr::Context) -> Result<Vec<::rust_dbr::Active<#table>>, ::rust_dbr::DbrError> {
-                }
-
-                let mut registry = QueryRegistry::default();
-                #( registry.add(context.relation_chain_from_path(#filter_path)?, #filter_op, #filter_value); )*
-
-                let relation_table_count = context.relation_table_count(relation_chains)?;
-                for (table, count) in relation_table_count.table_counts {
-                    for index in 0..count {
-
-                    }
-                }
-
-                #(
-                    let chain = context.relation_chain_from_path(#filter_path)?;
-                    match RelationChain::as_sql(relation_table_count)? {
-                        // if we are colocated we are fine and can just add to the filter list normally.
-                        RelationChain::Colocated(filter) => {
-                            joins.push(join);
-                        }
-                        RelationChain::Subquery(subquery) => {
-
-                        }
-                    }
-                )*
 
                 #limit_argument
 
@@ -436,44 +203,3 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
 
     Ok(TokenStream::from(expanded))
 }
-
-
-/*
-
-        match filter.filter_group {
-            FilterGroup::Expr(expr) => {
-                let mut segments = expr.path.segments.iter().collect::<Vec<_>>();
-                let op = expr.op.as_sql();
-                let value_expr = &expr.value;
-
-                // The last portion of a segment is the field.
-                let field = segments.pop()
-                    .expect("I'm not sure how you managed to get a filter path parsed without a single field...");
-                let path = segments;
-
-                let field = field.ident.to_string();
-                let path: Vec<String> = path
-                    .iter()
-                    .map(|segment| segment.ident.to_string())
-                    .collect();
-
-                let path = quote! {
-                    RelationPath {
-                        relations: vec![#( #path.to_owned() ),*].into(),
-                        field: #field.to_owned(),
-                    }
-                };
-
-                filter_paths.push(quote! {
-                    paths.push(#path);
-                });
-
-                filter_construct.push(quote! {
-                    let path = #path;
-                });
-
-                (path, op, value_expr)
-            }
-            _ => {},
-        }
-*/

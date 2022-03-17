@@ -178,6 +178,7 @@ impl Metadata {
                 table.id,
                 Table {
                     info: table,
+                    primary_key: None,
                     fields: HashMap::new(),
                     relations: HashMap::new(),
                 },
@@ -216,6 +217,9 @@ impl Metadata {
         for (field_id, field) in &self.fields {
             if let Some(table) = self.tables.get_mut(&field.table_id) {
                 table.fields.insert(field.name.clone(), *field_id);
+                if field.is_primary_key {
+                    table.primary_key = Some(*field_id);
+                }
             }
         }
 
@@ -388,6 +392,7 @@ pub struct Table {
     #[deref]
     pub info: TableInfo,
 
+    pub primary_key: Option<FieldId>,
     pub fields: HashMap<String, FieldId>,
     pub relations: HashMap<String, Vec<RelationId>>,
 }
@@ -409,6 +414,7 @@ impl TableInfo {
             .await
             .map_err(|err| DbrError::from(err))
     }
+
 }
 
 impl Table {
@@ -432,6 +438,10 @@ impl Table {
             })
             .into()),
         }
+    }
+
+    pub fn primary_key(&self) -> Option<FieldId> {
+        self.primary_key
     }
 }
 /*

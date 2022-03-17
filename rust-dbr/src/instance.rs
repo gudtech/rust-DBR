@@ -11,13 +11,14 @@ use crate::prelude::*;
 /// Global identifier for a DBR instance.
 ///
 /// Equivalent to the id of the dbr.dbr_instances table.
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(sqlx::Type, Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[sqlx(transparent)]
 pub struct DbrInstanceId(pub u32);
 
-#[derive(FromRow, Debug, Clone)]
+#[derive(sqlx::FromRow, Debug, Clone)]
 pub struct DbrInstanceInfo {
     #[sqlx(rename = "instance_id")]
-    id: u32,
+    id: DbrInstanceId,
 
     /// Database module type, e.g. `MySql`, `sqlite`, `postgres`
     module: String,
@@ -25,6 +26,7 @@ pub struct DbrInstanceInfo {
     /// Instance schema, e.g. `config`/`ops`/`constants`/`directory`
     #[sqlx(rename = "handle")]
     schema: String,
+    schema_id: SchemaId, // prefer using this over the schema handle.
 
     /// Type of instance, currently just `master` by default or `template` for template instance
     class: String,
@@ -44,7 +46,6 @@ pub struct DbrInstanceInfo {
     /// Could be useful for something in the future, but I'm not entirely sure yet.
     ///
     /// Feel free to move them above and add a comment if you think otherwise!
-    schema_id: i32,
     #[sqlx(rename = "dbfile")]
     database_file: Option<String>,
     #[sqlx(rename = "readonly")]
@@ -95,7 +96,7 @@ impl DbrInstanceInfo {
         self.connection_host_uri() == other.borrow().connection_host_uri()
     }
 
-    pub fn id(&self) -> u32 {
+    pub fn id(&self) -> DbrInstanceId {
         self.id
     }
 
@@ -152,14 +153,16 @@ pub enum InstanceModule {
 #[derive(Debug, Clone)]
 pub struct DbrInstances {
     // handle, tag -> dbr instance
-    handle_tags: HashMap<(String, Option<String>), DbrInstanceId>,
+    by_handle: HashMap<(String, Option<String>), DbrInstanceId>,
+    by_schema: HashMap<(SchemaId, Option<String>), DbrInstanceId>,
     instances: HashMap<DbrInstanceId, Arc<DbrInstance>>,
 }
 
 impl DbrInstances {
     pub fn new() -> Self {
         Self {
-            handle_tags: HashMap::new(),
+            by_handle: HashMap::new(),
+            by_schema: HashMap::new(),
             instances: HashMap::new(),
         }
     }
@@ -175,13 +178,43 @@ impl DbrInstances {
             })
     }
 
+    pub fn lookup_by_schema(
+        &self,
+        schema: SchemaId,
+        tag: Option<String>,
+    ) -> Result<Arc<DbrInstance>, DbrError> {
+        let common_instance = self.by_schema.get(&(schema.clone(), None));
+        let instance = self.by_schema.get(&(schema.clone(), tag.clone()));
+        let mut result = match (common_instance, instance) {
+            (_, Some(id)) => self.lookup_by_id(*id),
+            (Some(common_id), None) => self.lookup_by_id(*common_id),
+            _ => Err(DbrError::MissingInstance {
+                id: None,
+                handle: None,
+                tag: None,
+            }),
+        };
+
+        if let Err(DbrError::MissingInstance {
+            id: err_id,
+            handle: err_handle,
+            tag: err_tag,
+        }) = &mut result
+        {
+            *err_handle = Some(format!("{:?}", schema));
+            *err_tag = tag;
+        }
+
+        result
+    }
+
     pub fn lookup_by_handle(
         &self,
         handle: String,
         tag: Option<String>,
     ) -> Result<Arc<DbrInstance>, DbrError> {
-        let common_instance = self.handle_tags.get(&(handle.clone(), None));
-        let instance = self.handle_tags.get(&(handle.clone(), tag.clone()));
+        let common_instance = self.by_handle.get(&(handle.clone(), None));
+        let instance = self.by_handle.get(&(handle.clone(), tag.clone()));
         let mut result = match (common_instance, instance) {
             (_, Some(id)) => self.lookup_by_id(*id),
             (Some(common_id), None) => self.lookup_by_id(*common_id),
@@ -206,12 +239,14 @@ impl DbrInstances {
     }
 
     pub fn insert(&mut self, instance: DbrInstance) {
-        let id = DbrInstanceId(instance.info.id());
+        let id = instance.info.id();
         let handle = instance.info.schema().clone();
+        let schema_id = instance.info.schema_id;
         let tag = instance.info.tag().clone();
 
         self.instances.insert(id, Arc::new(instance));
-        self.handle_tags.insert((handle, tag), id);
+        self.by_handle.insert((handle, tag.clone()), id);
+        self.by_schema.insert((schema_id, tag), id);
     }
 }
 

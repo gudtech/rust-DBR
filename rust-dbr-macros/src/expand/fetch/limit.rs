@@ -1,13 +1,11 @@
-
-
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    Expr, Ident, Lit, Result, Token, token, Type,
+    token, Expr, Ident, Lit, Result, Token, Type,
 };
 
 use super::keyword;
