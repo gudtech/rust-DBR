@@ -78,8 +78,18 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
 
     let base_table_tokens = quote! { __base_table_id };
 
+    let mut predicate_tests = Vec::new();
+
     let filter = match input.arguments.filter {
         Some(filter) => {
+            let predicates = filter.filter_tree.all_predicates();
+            for predicate in predicates {
+                let binding_value = &predicate.value;
+                predicate_tests.push(quote_spanned! { binding_value.span() =>
+                    ::rust_dbr::_assert_bindable(#binding_value);
+                });
+            }
+
             let tokens = filter.filter_tree.as_filter_tree_tokens(&base_table_tokens);
             Some(tokens)
         }
@@ -114,6 +124,8 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
     // check that args are fine.
     let expanded = quote! {
         async {
+            #( #predicate_tests )*
+
             let __context = #context;
             use ::sqlx::Arguments;
             let __instance = __context.instance_by_handle(#table::schema().to_owned())?;

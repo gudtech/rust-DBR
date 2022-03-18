@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, Mutex, RwLock, Weak},
 };
 
-pub type Store<T> = BTreeMap<i64, Weak<Mutex<RecordMetadata<T>>>>;
+pub type Store<T> = BTreeMap<<T as DbrTable>::Id, Weak<Mutex<RecordMetadata<T>>>>;
 
 /// Per DBR Instance record cache
 ///
@@ -51,20 +51,20 @@ impl DbrRecordCache {
         }
     }
 
-    pub fn register<T: Any + Send + Sync>(&self) -> Result<(), DbrError> {
+    pub fn register<T: DbrTable + Any>(&self) -> Result<(), DbrError> {
         let mut map = self.records.write().map_err(|_| DbrError::PoisonError)?;
         map.entry(TypeId::of::<T>())
             .or_insert(Box::new(Store::<T>::new()));
         Ok(())
     }
 
-    pub fn is_registered<T: Any + Send + Sync>(&self) -> Result<bool, DbrError> {
+    pub fn is_registered<T: DbrTable + Any>(&self) -> Result<bool, DbrError> {
         let map = self.records.read().map_err(|_| DbrError::PoisonError)?;
         let contains = map.contains_key(&TypeId::of::<T>());
         Ok(contains)
     }
 
-    pub fn assert_registered<T: Any + Send + Sync>(&self) -> Result<(), DbrError> {
+    pub fn assert_registered<T: DbrTable + Any>(&self) -> Result<(), DbrError> {
         if !self.is_registered::<T>()? {
             self.register::<T>()?;
         }
@@ -72,9 +72,9 @@ impl DbrRecordCache {
         Ok(())
     }
 
-    pub fn set_record<T: Any + Send + Sync>(
+    pub fn set_record<T: DbrTable + Any>(
         &self,
-        id: i64,
+        id: <T as DbrTable>::Id,
         record: T,
     ) -> Result<Arc<Mutex<RecordMetadata<T>>>, DbrError> {
         self.assert_registered::<T>()?;
@@ -118,9 +118,9 @@ impl DbrRecordCache {
         }
     }
 
-    pub fn record<T: Any + Send + Sync>(
+    pub fn record<T: DbrTable + Any>(
         &self,
-        id: i64,
+        id: <T as DbrTable>::Id,
     ) -> Result<Arc<Mutex<RecordMetadata<T>>>, DbrError> {
         self.assert_registered::<T>()?;
 
@@ -134,7 +134,7 @@ impl DbrRecordCache {
                         }
                     }
 
-                    Err(DbrError::RecordNotFetched(id))
+                    Err(DbrError::RecordNotFetched)
                 }
                 None => Err(DbrError::DowncastError),
             },

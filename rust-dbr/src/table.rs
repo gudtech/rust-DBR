@@ -1,9 +1,12 @@
 use crate::prelude::*;
+use std::fmt::Debug;
+use std::hash::Hash;
 
 pub trait DbrTable
 where
-    Self: Send + Sync + Sized + Clone + 'static,
+    Self: Debug + Send + Sync + Sized + Clone + 'static,
 {
+    type Id: Debug + Send + Sync + Sized + Clone + PartialEq + Eq + PartialOrd + Ord + Hash + 'static;
     type ActiveModel: ActiveModel<Self>;
     type PartialModel: PartialModel<Self>;
     fn schema() -> &'static str;

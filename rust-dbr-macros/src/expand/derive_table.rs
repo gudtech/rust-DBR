@@ -88,6 +88,13 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
     let partial_ident = format_ident!("Partial{}", input.ident.clone());
     let fields_trait = format_ident!("{}Fields", input.ident.clone());
 
+    let id_field = named_fields
+        .iter()
+        .filter(|field| field.ident.clone().expect("field to have name").to_string() == "id")
+        .next()
+        .expect("expected dbr table to have an id field");
+    let id_field_ty = id_field.ty.clone();
+
     let field_name: Vec<_> = named_fields
         .iter()
         .map(|field| field.ident.clone().expect("field to have name"))
@@ -138,12 +145,13 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
 
                 Ok(())
             }
-            fn id(&self) -> Option<i64> {
+            fn id(&self) -> Option<<#ident as DbrTable>::Id> {
                 self.id
             }
         }
 
         impl ::rust_dbr::DbrTable for #ident {
+            type Id = #id_field_ty;
             type ActiveModel = ::rust_dbr::Active<#ident>;
             type PartialModel = #partial_ident;
             fn schema() -> &'static str {
@@ -188,9 +196,9 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
 
                 let partial_clone = partial.clone();
                 let instance = context.instance_by_handle(#ident::schema().to_owned())?;
-                let mut fields = Vec::new();
+                let mut fields: Vec<String> = Vec::new();
                 let mut query_str = String::new();
-                let mut arguments = ::sqlx::any::AnyArguments::default();
+                let mut arguments = ::sqlx::mysql::MySqlArguments::default();
 
                 #(
                     if let Some(field) = partial.#settable_field_name {

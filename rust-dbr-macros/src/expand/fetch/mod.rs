@@ -8,7 +8,7 @@ pub use prelude::*;
 
 pub fn argument_scalar(stream: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
     quote::quote! {
-        { use ::sqlx::Arguments; let mut args = ::sqlx::any::AnyArguments::default(); args.add(#stream); args }
+        { use ::sqlx::Arguments; let mut args = ::sqlx::mysql::MySqlArguments::default(); args.add(#stream); args }
     }
 }
 

@@ -1,12 +1,12 @@
 use std::{collections::HashMap, sync::Arc};
 
 use derive_more::Deref;
-use sqlx::{any::AnyArguments, encode::IsNull, Type};
+use sqlx::{mysql::MySqlArguments, any::AnyArguments, encode::IsNull, Type};
 
 //use crate::{metadata::{TableId, FieldId}, RelationPath, Context};
 use crate::prelude::*;
 
-type BindValue<'a> = AnyArguments<'a>;
+type BindValue = MySqlArguments;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OrderDirection {
@@ -16,14 +16,14 @@ pub enum OrderDirection {
 
 /// This is the construction of a select statement, this must be resolved before being able
 /// to be run as a SQL query.
-pub struct Select<'a>
+pub struct Select
 {
     pub fields: Vec<FieldId>,
     pub primary_table: TableId,
     pub joined_tables: Vec<RelationId>,
-    pub filters: Option<FilterTree<'a>>,
+    pub filters: Option<FilterTree>,
     pub order: Vec<(String, Option<OrderDirection>)>,
-    pub limit: Option<BindValue<'a>>,
+    pub limit: Option<BindValue>,
 }
 
 #[derive(Debug, Clone)]
@@ -110,16 +110,16 @@ impl PartialEq for ResolvedTable {
 /// A resolved select statement.
 ///
 /// This should have enough information by itself to be able to generate a SQL statement and bind arguments.
-pub struct ResolvedSelect<'a> {
+pub struct ResolvedSelect {
     pub fields: Vec<Field>,
     pub primary_table: ResolvedTable,
     pub joins: Vec<ResolvedJoin>,
-    pub filters: Option<ResolvedFilterTree<'a>>,
+    pub filters: Option<ResolvedFilterTree>,
     pub order: Vec<(Field, Option<OrderDirection>)>,
-    pub limit: Option<BindValue<'a>>,
+    pub limit: Option<BindValue>,
 }
 
-impl<'a> Select<'a> {
+impl Select {
     pub fn new(primary_table: TableId) -> Self {
         Select {
             primary_table,
@@ -135,8 +135,8 @@ impl<'a> Select<'a> {
         self.fields.len() == 1
     }
 
-    pub fn resolve(self, context: &Context) -> Result<ResolvedSelect<'a>, DbrError> {
-        let Select::<'a> {
+    pub fn resolve(self, context: &Context) -> Result<ResolvedSelect, DbrError> {
+        let Select {
             fields,
             primary_table,
             joined_tables,
@@ -181,6 +181,7 @@ impl<'a> Select<'a> {
                 });
             }
         }
+
         joins.dedup();
 
         let mut resolved_order = Vec::new();
@@ -201,12 +202,12 @@ impl<'a> Select<'a> {
     }
 }
 
-impl<'a> ResolvedSelect<'a> {
+impl ResolvedSelect {
     /// Return pure sql and arguments
     ///
     /// This will return `DbrError::UnresolvedQuery` if there is an external subquery somewhere still.
     /// Those have to be run before the "parent" statement.
-    pub fn as_sql(mut self) -> Result<(String, BindValue<'a>), DbrError> {
+    pub fn as_sql(mut self) -> Result<(String, BindValue), DbrError> {
         use sqlx::Arguments;
         let mut arguments = BindValue::default();
         let schema_table = self.primary_table.instanced_with_schema(None);
@@ -275,15 +276,15 @@ impl<'a> ResolvedSelect<'a> {
     }
 }
 
-pub enum FilterTree<'a> {
+pub enum FilterTree {
     Or {
-        left: Box<FilterTree<'a>>,
-        right: Box<FilterTree<'a>>,
+        left: Box<FilterTree>,
+        right: Box<FilterTree>,
     },
     And {
-        children: Vec<FilterTree<'a>>,
+        children: Vec<FilterTree>,
     },
-    Predicate(FilterPredicate<'a>),
+    Predicate(FilterPredicate),
 }
 
 pub enum FilterOp {
@@ -293,18 +294,18 @@ pub enum FilterOp {
     NotLike,
 }
 
-pub struct FilterPredicate<'a> {
+pub struct FilterPredicate {
     pub path: RelationPath,
     pub op: FilterOp,
-    pub value: BindValue<'a>,
+    pub value: BindValue,
 }
 
-impl<'a> FilterTree<'a> {
+impl FilterTree {
     /// Remove unnecessary grouping so we don't have to do any unnecessary recursion in the future.
     ///
     /// Mainly since `A and (B and C)` is semantically the same as `A and B and C`, then we can ungroup `B and C`.
     /// But we cannot reduce `A and (B or C)` into `A and B or C`
-    pub fn reduce(self) -> Option<FilterTree<'a>> {
+    pub fn reduce(self) -> Option<FilterTree> {
         match self {
             or_tree @ Self::Or { .. } => Some(or_tree),
             Self::And { mut children } => match children.len() {
@@ -346,7 +347,7 @@ impl<'a> FilterTree<'a> {
         context: &Context,
         base_table_id: TableId,
         registry: &mut TableRegistry,
-    ) -> Result<ResolvedFilterTree<'a>, DbrError> {
+    ) -> Result<ResolvedFilterTree, DbrError> {
         match self {
             Self::Or { left, right } => Ok(ResolvedFilterTree::Or {
                 left: Box::new(left.resolve(context, base_table_id, registry)?),
@@ -427,30 +428,30 @@ impl<'a> FilterTree<'a> {
     }
 }
 
-pub enum ResolvedFilter<'a> {
-    ExternalSubquery(Box<ResolvedSelect<'a>>),
+pub enum ResolvedFilter {
+    ExternalSubquery(Box<ResolvedSelect>),
     Predicate {
         table: ResolvedTable,
         table_index: Option<JoinedTableIndex>,
         field: Field,
         op: FilterOp,
-        value: BindValue<'a>,
+        value: BindValue,
     },
 }
 
-pub enum ResolvedFilterTree<'a> {
+pub enum ResolvedFilterTree {
     Or {
-        left: Box<ResolvedFilterTree<'a>>,
-        right: Box<ResolvedFilterTree<'a>>,
+        left: Box<ResolvedFilterTree>,
+        right: Box<ResolvedFilterTree>,
     },
     And {
-        children: Vec<ResolvedFilterTree<'a>>,
+        children: Vec<ResolvedFilterTree>,
     },
-    Predicate(ResolvedFilter<'a>),
+    Predicate(ResolvedFilter),
 }
 
-impl<'a> ResolvedFilterTree<'a> {
-    pub fn as_sql(self) -> Result<(String, BindValue<'a>), DbrError> {
+impl ResolvedFilterTree {
+    pub fn as_sql(self) -> Result<(String, BindValue), DbrError> {
         use sqlx::Arguments;
         match self {
             Self::Or { left, right } => {

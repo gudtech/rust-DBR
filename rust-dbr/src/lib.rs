@@ -7,7 +7,7 @@ pub mod metadata;
 pub mod model;
 pub mod table;
 
-pub fn _assert_bindable<'a, T: std::marker::Send + ::sqlx::Encode<'a, ::sqlx::Any> + ::sqlx::Type<::sqlx::Any>>(_t: T) {
+pub fn _assert_bindable<'a, T: std::marker::Send + ::sqlx::Encode<'a, ::sqlx::MySql> + ::sqlx::Type<::sqlx::MySql>>(_t: T) {
     // just here for compiler errors.
 }
 

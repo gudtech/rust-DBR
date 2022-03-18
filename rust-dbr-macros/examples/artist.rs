@@ -75,16 +75,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: metadata,
     };
 
+    pub struct MyStruct { somethin: i64, }
+    let something = MyStruct {
+        somethin: 1,
+    };
     let name = "%t%";
     let x = 4;
     let mut songs: Vec<Active<Song>> = fetch!(
         &context,
         Song where
-            name like name
+            name like something
             and album.artist.genre like "math%"
-            and (album.artist.genre like "%rock%" or album.id = 4)
+            and (album.artist.genre like "%rock%" or album.id = 4i64)
         order by id
-        limit 1
+        limit 1i64
     ).await?;
 
     /*

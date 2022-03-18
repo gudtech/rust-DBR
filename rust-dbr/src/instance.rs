@@ -254,13 +254,13 @@ impl DbrInstances {
 pub struct DbrInstance {
     pub info: DbrInstanceInfo,
     pub cache: DbrRecordCache,
-    pub pool: sqlx::AnyPool,
+    pub pool: sqlx::MySqlPool,
 }
 
 impl DbrInstance {
     pub async fn new(info: DbrInstanceInfo) -> Result<Self, DbrError> {
         let uri = info.connection_uri();
-        let pool = sqlx::AnyPool::connect(&uri).await?;
+        let pool = sqlx::MySqlPool::connect(&uri).await?;
 
         Ok(Self {
             info: info,

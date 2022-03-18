@@ -7,7 +7,7 @@ pub enum DbrError {
     PoisonError,
     UnregisteredType,
     CannotSetID,
-    RecordNotFetched(i64),
+    RecordNotFetched,
     MissingStore(String),
     SqlxError(sqlx::Error),
     PoolDisconnected,
@@ -30,7 +30,7 @@ impl std::fmt::Display for DbrError {
                 f,
                 "setting the id of an active record is currently not allowed"
             ),
-            Self::RecordNotFetched(id) => write!(f, "record was not available: {}", id),
+            Self::RecordNotFetched => write!(f, "record was not available"),
             Self::Unimplemented(value) => write!(f, "unimplemented {}", value),
             Self::MissingStore(store) => write!(f, "missing store '{}'", store),
 

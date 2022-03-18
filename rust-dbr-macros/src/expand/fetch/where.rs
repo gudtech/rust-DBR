@@ -53,6 +53,41 @@ pub enum FilterTree {
     },
 }
 
+impl FilterTree {
+    /// Mostly just used to test all the binding values to see if they are encodable
+    /// 
+    /// That way we don't get big scary red squiggly lines,
+    /// only small scary red squiggly lines
+    pub fn all_predicates(&self) -> Vec<&FilterPredicate> {
+        let mut predicates = Vec::new();
+        match &self {
+            Self::Or {
+                left, right,
+                ..
+            } => {
+                predicates.extend(left.all_predicates());
+                predicates.extend(right.all_predicates());
+            }
+            Self::And {
+                and,
+                ..
+            } => {
+                for child in and {
+                    predicates.extend(child.all_predicates());
+                }
+            }
+            Self::Predicate {
+                predicate,
+                ..
+            } => {
+                predicates.push(predicate);
+            }
+        }
+
+        predicates
+    }
+}
+
 impl Parse for FilterTree {
     fn parse(input: ParseStream) -> Result<Self> {
         let lookahead = input.lookahead1();
