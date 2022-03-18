@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     } */
 
-    let database_url = "mysql://devuser:password@localhost:3306/account_test";
+    //let database_url = "mysql://devuser:password@localhost:3306/account_test";
     let dbr_url = "mysql://devuser:password@localhost:3306/dbr";
 
     let pool = sqlx::mysql::MySqlPool::connect(dbr_url).await?;
@@ -75,15 +75,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: metadata,
     };
 
+    let name = "The Detail";
     let mut songs: Vec<Active<Song>> = fetch!(
         &context,
         Song where
-            name = "The Detail"
+            name = name
             and album.artist.genre like "math%"
             and (album.artist.genre like "%rock%" or album.id = 4i64)
         order by id
         limit 10
-    )?;
+    ).await?;
 
        //let mut songs: Vec<Active<Song>> = fetch!(&context, Song where album.artist.genre like "math%".to_string())?;
     for song in &mut songs {

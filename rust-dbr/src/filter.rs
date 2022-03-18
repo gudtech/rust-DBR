@@ -16,7 +16,8 @@ pub enum OrderDirection {
 
 /// This is the construction of a select statement, this must be resolved before being able
 /// to be run as a SQL query.
-pub struct Select<'a> {
+pub struct Select<'a>
+{
     pub fields: Vec<FieldId>,
     pub primary_table: TableId,
     pub joined_tables: Vec<RelationId>,

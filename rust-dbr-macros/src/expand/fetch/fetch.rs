@@ -76,7 +76,7 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
     let context = input.context;
     //let mut filter_path = Vec::new();
 
-    let base_table_tokens = quote! { base_table_id };
+    let base_table_tokens = quote! { __base_table_id };
 
     let filter = match input.arguments.filter {
         Some(filter) => {
@@ -130,38 +130,38 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
     };
 
     let expanded = quote! {
-        {
-            async fn __fetch_internal(context: &::rust_dbr::Context) -> Result<Vec<::rust_dbr::Active<#table>>, ::rust_dbr::DbrError> {
-                use ::sqlx::Arguments;
+        async {
+            let __context = #context;
+            use ::sqlx::Arguments;
+            let __instance = __context.instance_by_handle(#table::schema().to_owned())?;
 
-                let instance = context.instance_by_handle(#table::schema().to_owned())?;
-                let schema = context
-                    .metadata
-                    .lookup_schema(::rust_dbr::SchemaIdentifier::Name(#table::schema().to_owned()))?;
-                let base_table_id = schema.lookup_table_by_name(#table::table_name().to_owned())?;
-                let base_table = context.metadata.lookup_table(*base_table_id)?;
+            let __schema = __context
+                .metadata
+                .lookup_schema(::rust_dbr::SchemaIdentifier::Name(#table::schema().to_owned()))?;
+            let __base_table_id = __schema.lookup_table_by_name(#table::table_name().to_owned())?;
+            let __base_table = __context.metadata.lookup_table(*__base_table_id)?;
 
-                let mut select = ::rust_dbr::Select::new(*base_table_id);
-                select.filters = Some(#filter);
-                select.fields = base_table.fields.values().cloned().collect();
+            let mut __select = ::rust_dbr::Select::new(*__base_table_id);
+            __select.filters = Some(#filter);
+            __select.fields = __base_table.fields.values().cloned().collect();
 
-                let resolved_select = select.resolve(context)?;
-                let (sql, args) = resolved_select.as_sql()?;
-                dbg!(&sql);
-                let result_set: Vec<#table> = ::sqlx::query_as_with(&sql, args)
-                    .fetch_all(&instance.pool).await?;
+            let __resolved_select = __select.resolve(__context)?;
+            let (__sql, __args) = __resolved_select.as_sql()?;
 
-                let mut active_records: Vec<::rust_dbr::Active<#table>> = Vec::new();
-                for record in result_set {
-                    let id = record.id;
-                    let record_ref = instance.cache.set_record(id, record)?;
-                    active_records.push(::rust_dbr::Active::<#table>::from_arc(id, record_ref));
-                }
+            dbg!(&__sql);
 
-                Ok(active_records)
+            // We have to capture the variables out here.
+            let __result_set: Vec<#table> = ::sqlx::query_as_with(&__sql, __args)
+                .fetch_all(&__instance.pool).await?;
+
+            let mut active_records: Vec<::rust_dbr::Active<#table>> = Vec::new();
+            for record in __result_set {
+                let id = record.id;
+                let record_ref = __instance.cache.set_record(id, record)?;
+                active_records.push(::rust_dbr::Active::<#table>::from_arc(id, record_ref));
             }
 
-            __fetch_internal(#context).await
+            Ok::<Vec<::rust_dbr::Active<#table>>, ::rust_dbr::DbrError>(active_records)
         }
     };
 
