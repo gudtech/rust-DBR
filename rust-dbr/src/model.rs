@@ -1,9 +1,6 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::{
-        atomic::{AtomicI64, Ordering},
-        Arc, Mutex,
-    },
+    sync::{Arc, Mutex},
 };
 
 use crate::prelude::*;
@@ -40,7 +37,7 @@ where
 /// Portions of the record to be updated/created.
 pub trait PartialModel<T>
 where
-    T: DbrTable
+    T: DbrTable,
 {
     fn apply<R>(self, record: &mut R) -> Result<(), DbrError>
     where
@@ -68,7 +65,7 @@ where
 
 impl<T> ActiveModel<T> for Active<T>
 where
-    T: DbrTable
+    T: DbrTable,
 {
     fn id(&self) -> <T as DbrTable>::Id {
         self.id.clone()

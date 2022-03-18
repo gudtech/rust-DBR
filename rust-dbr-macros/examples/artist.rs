@@ -75,10 +75,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         metadata: metadata,
     };
 
-    pub struct MyStruct { somethin: i64, }
-    let something = MyStruct {
-        somethin: 1,
-    };
+    pub struct MyStruct {
+        somethin: i64,
+    }
+    let something = MyStruct { somethin: 1 };
     let name = "%t%";
     let x = 4;
     let mut songs: Vec<Active<Song>> = fetch!(
@@ -89,20 +89,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             and (album.artist.genre like "%rock%" or album.id = 4i64)
         order by id
         limit 1i64
-    ).await?;
+    )
+    .await?;
 
     /*
-    for song in &mut songs {
-        let id = song.id();
-        let name = song.name()?;
-        let album_id = song.album_id()?;
-        dbg!(&id, &name, &album_id);
-        song.set_name(&context, song.name()?).await?;
-        song.set_album_id(&context, song.album_id()?).await?;
-        dbg!(&song.likes()?);
-        song.set_likes(&context, song.likes()? + 1).await?;
-        dbg!(&song.likes()?);
-    }
- */
+       for song in &mut songs {
+           let id = song.id();
+           let name = song.name()?;
+           let album_id = song.album_id()?;
+           dbg!(&id, &name, &album_id);
+           song.set_name(&context, song.name()?).await?;
+           song.set_album_id(&context, song.album_id()?).await?;
+           dbg!(&song.likes()?);
+           song.set_likes(&context, song.likes()? + 1).await?;
+           dbg!(&song.likes()?);
+       }
+    */
     Ok(())
 }

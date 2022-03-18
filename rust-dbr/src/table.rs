@@ -6,7 +6,17 @@ pub trait DbrTable
 where
     Self: Debug + Send + Sync + Sized + Clone + 'static,
 {
-    type Id: Debug + Send + Sync + Sized + Clone + PartialEq + Eq + PartialOrd + Ord + Hash + 'static;
+    type Id: Debug
+        + Send
+        + Sync
+        + Sized
+        + Clone
+        + PartialEq
+        + Eq
+        + PartialOrd
+        + Ord
+        + Hash
+        + 'static;
     type ActiveModel: ActiveModel<Self>;
     type PartialModel: PartialModel<Self>;
     fn schema() -> &'static str;

@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use sqlx::{Decode, FromRow, MySql};
+use sqlx::{ MySql};
 
 use crate::prelude::*;
 
@@ -46,8 +46,10 @@ pub struct DbrInstanceInfo {
     /// Could be useful for something in the future, but I'm not entirely sure yet.
     ///
     /// Feel free to move them above and add a comment if you think otherwise!
+    #[allow(dead_code)]
     #[sqlx(rename = "dbfile")]
     database_file: Option<String>,
+    #[allow(dead_code)]
     #[sqlx(rename = "readonly")]
     read_only: Option<bool>,
 }
@@ -196,9 +198,9 @@ impl DbrInstances {
         };
 
         if let Err(DbrError::MissingInstance {
-            id: err_id,
             handle: err_handle,
             tag: err_tag,
+            ..
         }) = &mut result
         {
             *err_handle = Some(format!("{:?}", schema));
@@ -226,9 +228,9 @@ impl DbrInstances {
         };
 
         if let Err(DbrError::MissingInstance {
-            id: err_id,
             handle: err_handle,
             tag: err_tag,
+            ..
         }) = &mut result
         {
             *err_handle = Some(handle);

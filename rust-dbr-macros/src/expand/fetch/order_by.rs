@@ -1,11 +1,9 @@
-use std::collections::{HashMap, HashSet};
-
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    token, Expr, Ident, Lit, Result, Token, Type,
+    Ident, Result, Token,
 };
 
 pub use super::prelude::*;
@@ -24,32 +22,29 @@ pub trait AsStatementToken {
 impl AsStatementToken for Option<OrderByDirection> {
     fn as_tokens(&self) -> TokenStream {
         match self {
-            Some(OrderByDirection::Asc(_)) => quote! { Some(::rust_dbr::OrderDirection::Ascending) },
-            Some(OrderByDirection::Desc(_)) => quote! { Some(::rust_dbr::OrderDirection::Descending) },
+            Some(OrderByDirection::Asc(_)) => {
+                quote! { Some(::rust_dbr::OrderDirection::Ascending) }
+            }
+            Some(OrderByDirection::Desc(_)) => {
+                quote! { Some(::rust_dbr::OrderDirection::Descending) }
+            }
             None => quote! { None },
         }
     }
 }
 
 impl OrderByArgs {
-    pub fn as_sql(&self) -> String {
-        let mut keys = Vec::new();
-        for key in self.keys.iter() {
-            let direction = match &key.direction {
-                Some(OrderByDirection::Asc(_)) => " ASC",
-                Some(OrderByDirection::Desc(_)) => " DESC",
-                None => "",
-            };
-
-            keys.push(format!("{}{}", key.ident.to_string(), direction));
-        }
-
-        format!("ORDER BY {}", keys.join(", "))
-    }
-
     pub fn as_tokens(&self) -> Option<TokenStream> {
-        let key = self.keys.iter().map(|key| key.ident.to_string()).collect::<Vec<_>>();
-        let direction = self.keys.iter().map(|key| key.direction.as_tokens()).collect::<Vec<_>>();
+        let key = self
+            .keys
+            .iter()
+            .map(|key| key.ident.to_string())
+            .collect::<Vec<_>>();
+        let direction = self
+            .keys
+            .iter()
+            .map(|key| key.direction.as_tokens())
+            .collect::<Vec<_>>();
         if key.len() > 0 {
             Some(quote! { vec![#( (#key.to_owned(), #direction) ),*] })
         } else {

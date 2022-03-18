@@ -1,5 +1,5 @@
 use derive_more::Deref;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
 use crate::{
@@ -70,7 +70,7 @@ impl TableRegistry {
 
     pub fn add(
         &mut self,
-        context: &Context,
+        _context: &Context,
         chain: &RelationChain,
     ) -> Result<(Option<JoinedTableIndex>, JoinedTableIndex), DbrError> {
         match self.relation_hash.get(&chain) {
@@ -122,9 +122,7 @@ impl Context {
     /// I'm taking the liberty of just calling a string of relations like
     pub fn is_colocated(&self, relation: &Relation) -> Result<bool, DbrError> {
         let from_table = self.metadata.lookup_table(relation.from_table_id)?;
-        let from_field = self.metadata.lookup_field(relation.from_field_id)?;
         let to_table = self.metadata.lookup_table(relation.to_table_id)?;
-        let to_field = self.metadata.lookup_field(relation.to_field_id)?;
 
         let base_instance = self.instance_by_schema(from_table.schema_id)?;
         let related_instance = self.instance_by_schema(to_table.schema_id)?;
@@ -149,7 +147,6 @@ impl RelationPath {
                 // e.g. if we had 2 different fields relating to the same table.
                 //
                 // Maybe some syntax like `song.album<parent>.artist` or something?
-                // But for now lets just take the first one.
                 return Err(unimplemented!());
             }
 

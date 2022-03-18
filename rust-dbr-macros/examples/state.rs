@@ -1,8 +1,4 @@
-
-use rust_dbr::{
-    metadata::Metadata,
-    prelude::*,
-};
+use rust_dbr::{metadata::Metadata, prelude::*};
 use rust_dbr_macros::{fetch, DbrTable};
 
 #[derive(DbrTable, sqlx::FromRow, Debug, Clone)]
@@ -44,10 +40,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let country_id: Option<i32> = None;
     let states = if let Some(country_id) = country_id {
         fetch!(&context, State where name like format!("%{}%", query)
-            and country_id = country_id).await?
+            and country_id = country_id)
+        .await?
     } else {
         fetch!(&context, State where name like format!("%{}%", query)
-            and countries.code2 = "US").await?
+            and countries.code2 = "US")
+        .await?
     };
 
     for state in states {
@@ -58,4 +56,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-

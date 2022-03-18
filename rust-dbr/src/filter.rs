@@ -1,7 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use derive_more::Deref;
-use sqlx::{mysql::MySqlArguments, any::AnyArguments, encode::IsNull, Type};
+use sqlx::mysql::MySqlArguments;
 
 //use crate::{metadata::{TableId, FieldId}, RelationPath, Context};
 use crate::prelude::*;
@@ -16,8 +16,7 @@ pub enum OrderDirection {
 
 /// This is the construction of a select statement, this must be resolved before being able
 /// to be run as a SQL query.
-pub struct Select
-{
+pub struct Select {
     pub fields: Vec<FieldId>,
     pub primary_table: TableId,
     pub joined_tables: Vec<RelationId>,
@@ -235,18 +234,20 @@ impl ResolvedSelect {
         arguments.extend(filter_args);
 
         let order_str = if self.order.len() > 0 {
-            "ORDER BY ".to_owned() + &self.order
-                .iter()
-                .map(|(field, dir)| {
-                    let dir_str = match dir {
-                        Some(OrderDirection::Ascending) => " ASC",
-                        Some(OrderDirection::Descending) => " DESC",
-                        _ => "",
-                    };
-                    field.name.clone() + dir_str
-                })
-                .collect::<Vec<_>>()
-                .join(", ")
+            "ORDER BY ".to_owned()
+                + &self
+                    .order
+                    .iter()
+                    .map(|(field, dir)| {
+                        let dir_str = match dir {
+                            Some(OrderDirection::Ascending) => " ASC",
+                            Some(OrderDirection::Descending) => " DESC",
+                            _ => "",
+                        };
+                        field.name.clone() + dir_str
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
         } else {
             String::new()
         };
@@ -267,12 +268,11 @@ impl ResolvedSelect {
             r#where = filter_sql,
             order = order_str,
             limit = limit_str,
-        ).trim().to_owned();
+        )
+        .trim()
+        .to_owned();
 
-        Ok((
-            sql,
-            arguments,
-        ))
+        Ok((sql, arguments))
     }
 }
 
@@ -474,7 +474,7 @@ impl ResolvedFilterTree {
                 Ok((sql.join(" AND "), args))
             }
             Self::Predicate(filter) => match filter {
-                ResolvedFilter::ExternalSubquery(subquery) => {
+                ResolvedFilter::ExternalSubquery(_subquery) => {
                     Err(DbrError::UnfinishedExternalSubquery)
                 }
                 ResolvedFilter::Predicate {

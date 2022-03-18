@@ -1,10 +1,8 @@
 use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote, ToTokens};
-use syn::parse::{Parse, ParseStream, Parser, Result};
-use syn::{
-    parse, parse_macro_input, punctuated::Punctuated, DeriveInput, Ident, ItemStruct, LitStr, Token,
-};
-use syn::{Attribute, Data, Error, Expr, Fields, Lit, Meta, MetaNameValue, Type};
+use syn::parse::Result;
+use syn::{Attribute, Data, Error, Fields, Lit, Meta, MetaNameValue, Type};
+use syn::{DeriveInput, LitStr};
 
 const TABLE_ATTRIBUTE_DESCRIPTOR: &'static str = "#[table = \"...\"]";
 
@@ -99,7 +97,7 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
         .iter()
         .map(|field| field.ident.clone().expect("field to have name"))
         .collect();
-    let field_type: Vec<_> = named_fields.iter().map(|field| field.ty.clone()).collect();
+    //let field_type: Vec<_> = named_fields.iter().map(|field| field.ty.clone()).collect();
 
     let getter_fields: Vec<_> = named_fields
         .iter()

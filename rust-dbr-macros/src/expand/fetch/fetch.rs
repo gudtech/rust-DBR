@@ -1,11 +1,9 @@
-use std::collections::{HashMap, HashSet};
-
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::{quote, quote_spanned};
 use syn::{
     parse::{Parse, ParseStream},
-    punctuated::Punctuated,
-    token, Expr, Ident, Lit, Result, Token, Type, spanned::Spanned,
+    spanned::Spanned,
+    Expr, Ident, Result, Token,
 };
 
 pub use super::prelude::*;
@@ -100,10 +98,10 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
         if let Some(tokens) = order.as_tokens() {
             quote! { __select.order = #tokens; }
         } else {
-            quote! { }
+            quote! {}
         }
     } else {
-        quote! { }
+        quote! {}
     };
 
     let limit = if let Some(limit) = input.arguments.limit {
@@ -118,7 +116,7 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
             __select.limit = Some(#arg_scalar);
         }
     } else {
-        quote! { }
+        quote! {}
     };
 
     // check that args are fine.

@@ -1,11 +1,9 @@
-use std::collections::{HashMap, HashSet};
-
-use proc_macro2::{Span, TokenStream};
+use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    token, Expr, Ident, Lit, Result, Token, Type,
+    token, Expr, Ident, Result, Token,
 };
 
 use super::keyword;
@@ -24,14 +22,6 @@ impl Parse for WhereArgs {
             keyword: input.parse()?,
             filter_tree: input.parse()?,
         })
-    }
-}
-
-impl WhereArgs {
-    pub fn as_filter_tree(&self) -> Result<TokenStream> {
-        let expanded = quote! {};
-
-        Ok(expanded)
     }
 }
 
@@ -55,31 +45,22 @@ pub enum FilterTree {
 
 impl FilterTree {
     /// Mostly just used to test all the binding values to see if they are encodable
-    /// 
+    ///
     /// That way we don't get big scary red squiggly lines,
     /// only small scary red squiggly lines
     pub fn all_predicates(&self) -> Vec<&FilterPredicate> {
         let mut predicates = Vec::new();
         match &self {
-            Self::Or {
-                left, right,
-                ..
-            } => {
+            Self::Or { left, right, .. } => {
                 predicates.extend(left.all_predicates());
                 predicates.extend(right.all_predicates());
             }
-            Self::And {
-                and,
-                ..
-            } => {
+            Self::And { and, .. } => {
                 for child in and {
                     predicates.extend(child.all_predicates());
                 }
             }
-            Self::Predicate {
-                predicate,
-                ..
-            } => {
+            Self::Predicate { predicate, .. } => {
                 predicates.push(predicate);
             }
         }
@@ -219,7 +200,7 @@ impl FilterPath {
     /// Every portion of the path aside from the field.
     pub fn relations(&self) -> Vec<&FilterPathSegment> {
         let segments = self.segments.iter().collect::<Vec<_>>();
-        if let Some((field, relations)) = segments.as_slice().split_last() {
+        if let Some((_field, relations)) = segments.as_slice().split_last() {
             relations.to_vec()
         } else {
             Vec::new()
@@ -234,7 +215,8 @@ impl FilterPath {
     }
 
     pub fn field(&self) -> &FilterPathSegment {
-        self.segments.iter().last().expect("")
+        self.segments.iter().last()
+            .expect("I didn't think it could be done, congratulations on getting a filter path parsed without a single field...")
     }
 
     pub fn field_str(&self) -> String {

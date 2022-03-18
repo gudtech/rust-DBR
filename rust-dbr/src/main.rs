@@ -1,5 +1,3 @@
-use rust_dbr::prelude::*;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     //let sqlite = sqlite::open(":memory:");
 
