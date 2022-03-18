@@ -6,7 +6,15 @@ pub mod r#where;
 
 pub use prelude::*;
 
+pub fn argument_scalar(stream: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    quote::quote! {
+        { use ::sqlx::Arguments; let mut args = ::sqlx::any::AnyArguments::default(); args.add(#stream); args }
+    }
+}
+
 mod prelude {
+    pub use super::argument_scalar;
+
     pub use super::fetch::*;
     pub use super::keyword;
     pub use super::limit::*;

@@ -241,11 +241,12 @@ impl FilterPredicate {
         let op_tokens = self.op.as_tokens();
         let path_tokens = self.path.as_relation_path_tokens(base_table_expr);
         let value_tokens = &self.value;
+        let arg_scalar = argument_scalar(quote! { #value_tokens });
         quote! {
             ::rust_dbr::FilterPredicate {
                 path: #path_tokens,
                 op: #op_tokens,
-                value: { use ::sqlx::Arguments; let mut args = ::sqlx::any::AnyArguments::default(); args.add(#value_tokens); args },
+                value: #arg_scalar,
             }
         }
     }

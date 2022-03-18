@@ -1,11 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use proc_macro2::{Span, TokenStream};
-use quote::quote;
+use quote::{quote, quote_spanned};
 use syn::{
     parse::{Parse, ParseStream},
     punctuated::Punctuated,
-    token, Expr, Ident, Lit, Result, Token, Type,
+    token, Expr, Ident, Lit, Result, Token, Type, spanned::Spanned,
 };
 
 pub use super::prelude::*;
@@ -86,49 +86,32 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
         None => None,
     };
 
-    //filter.filter_tree.
-    // Song where album.artist.genre like "math%" and (album.artist.genre like "%rock%" or album.id = 4)
-    // expands to
-    //
-    // SELECT id FROM other.artist artist1
-    // WHERE
-    //      genre LIKE ? // "math%"
-    //
-    // SELECT id FROM other.artist artist1
-    // WHERE
-    //      genre LIKE ? // "%rock%"
-    //
-    // SELECT ... FROM account_test.song song1
-    // JOIN account_test.album album1 ON (song1.album_id = album1.id)
-    // #JOIN other.artist artist1 ON (album1.artist_id = artist1.id)
-    // WHERE
-    //      album1.artist_id IN (SELECT id FROM other.artist artist1 WHERE artist1.genre LIKE ? // "math%")
-    // AND (album1.artist_id IN (SELECT id FROM other.artist artist1 WHERE artist1.genre LIKE ? // "%rock%") OR album1.id = ?) // 4
-    //
-    //      artist1.genre LIKE ?
-    // AND (artist1.genre LIKE ? OR album1.id = ?)
-    // AND (album1.id IN (...))
-
-    // we need to have the sql take the table instance from the relation
-
-    let order_by_str = if let Some(order_by) = input.arguments.order_by {
-        order_by.as_sql()
+    let order_by = if let Some(order) = input.arguments.order_by {
+        if let Some(tokens) = order.as_tokens() {
+            quote! { __select.order = #tokens; }
+        } else {
+            quote! { }
+        }
     } else {
-        "".to_owned()
+        quote! { }
     };
 
-    let (limit_str, limit_argument) = if let Some(limit) = input.arguments.limit {
+    let limit = if let Some(limit) = input.arguments.limit {
         let limit_expr = limit.limit_expr;
-        (
-            "LIMIT ?".to_owned(),
-            Some(quote! {
-                arguments.add(#limit_expr);
-            }),
-        )
+        let assert_bindable = quote_spanned! { limit_expr.span() =>
+            ::rust_dbr::_assert_bindable(#limit_expr);
+        };
+
+        let arg_scalar = argument_scalar(quote! { #limit_expr });
+        quote! {
+            #assert_bindable
+            __select.limit = Some(#arg_scalar);
+        }
     } else {
-        ("".to_owned(), None)
+        quote! { }
     };
 
+    // check that args are fine.
     let expanded = quote! {
         async {
             let __context = #context;
@@ -144,6 +127,8 @@ pub fn fetch(input: FetchInput) -> Result<TokenStream> {
             let mut __select = ::rust_dbr::Select::new(*__base_table_id);
             __select.filters = Some(#filter);
             __select.fields = __base_table.fields.values().cloned().collect();
+            #order_by
+            #limit
 
             let __resolved_select = __select.resolve(__context)?;
             let (__sql, __args) = __resolved_select.as_sql()?;

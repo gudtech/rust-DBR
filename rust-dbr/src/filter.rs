@@ -22,7 +22,7 @@ pub struct Select<'a>
     pub primary_table: TableId,
     pub joined_tables: Vec<RelationId>,
     pub filters: Option<FilterTree<'a>>,
-    pub order: Vec<(FieldId, Option<OrderDirection>)>,
+    pub order: Vec<(String, Option<OrderDirection>)>,
     pub limit: Option<BindValue<'a>>,
 }
 
@@ -183,13 +183,20 @@ impl<'a> Select<'a> {
         }
         joins.dedup();
 
+        let mut resolved_order = Vec::new();
+        for (field_name, direction) in order.into_iter() {
+            let field_id = table.lookup_field(field_name)?;
+            let field = context.metadata.lookup_field(*field_id)?;
+            resolved_order.push((field.clone(), direction));
+        }
+
         Ok(ResolvedSelect {
             fields: resolved_fields,
             primary_table: resolved_table,
             joins: joins,
             filters: resolved_filters,
-            order: Vec::new(),
-            limit: None,
+            order: resolved_order,
+            limit: limit,
         })
     }
 }
@@ -226,8 +233,30 @@ impl<'a> ResolvedSelect<'a> {
 
         arguments.extend(filter_args);
 
-        let order = String::new();
-        let limit = String::new();
+        let order_str = if self.order.len() > 0 {
+            "ORDER BY ".to_owned() + &self.order
+                .iter()
+                .map(|(field, dir)| {
+                    let dir_str = match dir {
+                        Some(OrderDirection::Ascending) => " ASC",
+                        Some(OrderDirection::Descending) => " DESC",
+                        _ => "",
+                    };
+                    field.name.clone() + dir_str
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            String::new()
+        };
+
+        let limit_str = match self.limit {
+            Some(limit) => {
+                arguments.extend(limit);
+                "LIMIT ?".to_owned()
+            }
+            _ => String::new(),
+        };
 
         let sql = format!(
             "SELECT {fields} FROM {table} {joins} {where} {order} {limit}",
@@ -235,8 +264,8 @@ impl<'a> ResolvedSelect<'a> {
             table = schema_table,
             joins = joins.join(" "),
             r#where = filter_sql,
-            order = order,
-            limit = limit,
+            order = order_str,
+            limit = limit_str,
         ).trim().to_owned();
 
         Ok((

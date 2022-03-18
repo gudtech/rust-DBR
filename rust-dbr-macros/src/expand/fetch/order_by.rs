@@ -17,6 +17,20 @@ pub struct OrderByArgs {
     pub keys: Punctuated<Key, Token![,]>,
 }
 
+pub trait AsStatementToken {
+    fn as_tokens(&self) -> TokenStream;
+}
+
+impl AsStatementToken for Option<OrderByDirection> {
+    fn as_tokens(&self) -> TokenStream {
+        match self {
+            Some(OrderByDirection::Asc(_)) => quote! { Some(::rust_dbr::OrderDirection::Ascending) },
+            Some(OrderByDirection::Desc(_)) => quote! { Some(::rust_dbr::OrderDirection::Descending) },
+            None => quote! { None },
+        }
+    }
+}
+
 impl OrderByArgs {
     pub fn as_sql(&self) -> String {
         let mut keys = Vec::new();
@@ -31,6 +45,16 @@ impl OrderByArgs {
         }
 
         format!("ORDER BY {}", keys.join(", "))
+    }
+
+    pub fn as_tokens(&self) -> Option<TokenStream> {
+        let key = self.keys.iter().map(|key| key.ident.to_string()).collect::<Vec<_>>();
+        let direction = self.keys.iter().map(|key| key.direction.as_tokens()).collect::<Vec<_>>();
+        if key.len() > 0 {
+            Some(quote! { vec![#( (#key.to_owned(), #direction) ),*] })
+        } else {
+            None
+        }
     }
 }
 
