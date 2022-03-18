@@ -131,36 +131,6 @@ impl Context {
     }
 }
 
-impl RelationPath {
-    pub fn into_chain(mut self, context: &Context) -> Result<RelationChain, DbrError> {
-        let base_table = context.metadata.lookup_table(self.base)?;
-        let mut chain = RelationChain {
-            base: base_table.id,
-            chain: Vec::new(),
-        };
-
-        if let Some(relation_name) = self.relations.pop_front() {
-            let relation_ids = base_table.lookup_relation(relation_name)?;
-
-            if relation_ids.len() != 1 {
-                // TODO: We should probably have some ability to control which relation we are talking about
-                // e.g. if we had 2 different fields relating to the same table.
-                //
-                // Maybe some syntax like `song.album<parent>.artist` or something?
-                return Err(unimplemented!());
-            }
-
-            let relation_id = relation_ids[0];
-            chain.chain.push(relation_id);
-
-            let relation = context.metadata.lookup_relation(relation_id)?;
-            chain.chain.extend(self.into_chain(context)?.chain);
-        }
-
-        Ok(chain)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RelationChain {
     base: TableId,

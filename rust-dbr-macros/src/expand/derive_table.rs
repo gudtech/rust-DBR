@@ -126,6 +126,7 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
             #partial_fields
         }
 
+        #[automatically_derived]
         impl ::rust_dbr::PartialModel<#ident> for #partial_ident {
             fn apply<R>(self, mut record: &mut R) -> Result<(), DbrError>
             where
@@ -148,6 +149,7 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
             }
         }
 
+        #[automatically_derived]
         impl ::rust_dbr::DbrTable for #ident {
             type Id = #id_field_ty;
             type ActiveModel = ::rust_dbr::Active<#ident>;
@@ -181,6 +183,7 @@ pub fn dbr_table(input: DeriveInput) -> Result<TokenStream> {
         }
 
         #[::async_trait::async_trait]
+        #[automatically_derived]
         impl #fields_trait for ::rust_dbr::Active<#ident> {
             #(
                 fn #getter_field_name(&self) -> Result<#getter_field_type, ::rust_dbr::DbrError> {

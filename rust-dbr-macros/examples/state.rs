@@ -25,6 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let all_instances = DbrInstanceInfo::fetch_all(&pool).await?;
     for mut info in all_instances {
+        // for the sake of development for now
         info.set_host("localhost:3306".to_owned());
         let instance = DbrInstance::new(info).await?;
         instances.insert(instance);
@@ -37,7 +38,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let query = "";
-    let country_id: Option<i32> = None;
+
+    // Need to fix the "null bitmap" for mysql
+    let country_id: Option<i32> = None; 
     let states = if let Some(country_id) = country_id {
         fetch!(&context, State where name like format!("%{}%", query)
             and country_id = country_id)

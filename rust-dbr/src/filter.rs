@@ -138,7 +138,7 @@ impl Select {
         let Select {
             fields,
             primary_table,
-            joined_tables,
+            joined_tables: _,
             filters,
             order,
             limit,
