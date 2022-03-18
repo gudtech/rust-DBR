@@ -5,45 +5,11 @@ use rust_dbr::{
 };
 use rust_dbr_macros::{fetch, DbrTable};
 
-/*
-MySQL [constants]> select * from states limit 10;
-+----+------------+-----------------------+------+---------+-----------+
-| id | country_id | name                  | abbr | sortval | iso3166_2 |
-+----+------------+-----------------------+------+---------+-----------+
-|  1 |          1 | Armed Forces Europe   | AE   |       1 | NULL      |
-|  2 |          1 | Armed Forces Americas | AA   |       2 | NULL      |
-|  3 |          1 | Armed Forces Pacific  | AP   |       3 | NULL      |
-|  4 |          1 | Alabama               | AL   |       4 | NULL      |
-|  5 |          1 | Alaska                | AK   |       5 | NULL      |
-|  6 |          1 | American Samoa        | AS   |       6 | NULL      |
-|  7 |          1 | Arizona               | AZ   |       7 | NULL      |
-|  8 |          1 | Arkansas              | AR   |       8 | NULL      |
-|  9 |          1 | California            | CA   |       9 | NULL      |
-| 10 |          1 | Colorado              | CO   |      10 | NULL      |
-+----+------------+-----------------------+------+---------+-----------+
-10 rows in set (0.00 sec)
-
-MySQL [constants]> show create table states;
-+--------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| Table  | Create Table                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-+--------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
-| states | CREATE TABLE `states` (
-  `id` mediumint(8) unsigned NOT NULL AUTO_INCREMENT,
-  `country_id` mediumint(8) unsigned DEFAULT NULL,
-  `name` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `abbr` char(8) COLLATE utf8mb4_unicode_ci NOT NULL,
-  `sortval` int(10) unsigned NOT NULL,
-  `iso3166_2` varchar(10) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
-  PRIMARY KEY (`id`),
-  KEY `country` (`country_id`),
-  CONSTRAINT `fk_states_country` FOREIGN KEY (`country_id`) REFERENCES `countries` (`id`)
-) ENGINE=InnoDB AUTO_INCREMENT=731 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci |
-*/
-
 #[derive(DbrTable, sqlx::FromRow, Debug, Clone)]
 #[table = "constants.states"]
 pub struct State {
     id: u32,
+    // not entirely sure why this is null
     country_id: Option<u32>,
     name: String,
     abbr: String,
